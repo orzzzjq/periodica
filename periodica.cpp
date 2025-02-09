@@ -12,7 +12,7 @@ using namespace Eigen;
 double inputVolumeInv = 1; 
 
 // function for exchanging two indices
-inline void exchange(int& x, int& y) { int z = x; x = y, y = z; };
+inline void swap(int& x, int& y) { int z = x; x = y, y = z; };
 
 // minimum of two double variables
 inline double min(double x, double y) { return x < y ? x : y; };
@@ -71,7 +71,7 @@ public:
 			bool found = 0;
 			for (l = j; l < cols; ++l) {
 				if (M(i, colid[l]) != 0) {
-					exchange(colid[j], colid[l]);
+					swap(colid[j], colid[l]);
 					found = 1;
 					break;
 				}
@@ -99,7 +99,7 @@ public:
 								M(l, colid[j]) -= M(l, colid[k]) * t;
 							}
 						}
-						exchange(colid[j], colid[k]);
+						swap(colid[j], colid[k]);
 					}
 				}
 			}
@@ -185,7 +185,7 @@ public:
 
 	std::string toString() {
 		char s[50];
-		sprintf_s(s, "%.3f %sR^%d", _coefficient, (_exponent > 1 ? "pi " : ""), _exponent);
+		sprintf_s(s, "%.3f %sR^%d", _coefficient, (_exponent > 1 ? "¦Ð" : ""), _exponent);
 		return std::string(s);
 	}
 };
@@ -215,13 +215,13 @@ private:
 public:
 	Arc() : Simplex(1, 0), _source(0), _target(0) { _shift = Vector(0, 1); }
 	// construct with dimensionality
-	Arc(double f, int s, int t, int d)
+	Arc(int s, int t, double f, int d)
 		: Simplex(1, f), _source(s), _target(t) {
 		_shift = Vector(d, 1);
 		_shift.setZero();
 	}
 	// construct with nonzero shift vector
-	Arc(double f, int s, int t, Vector v)
+	Arc(int s, int t, double f, Vector v)
 		: Simplex(1, f), _source(s), _target(t), _shift(v) {}
 
 	int source() { return _source; }
@@ -255,7 +255,7 @@ public:
 	}
 
 	// construct with filtration value, dimensionality, and index
-	Vertex(double f, int d, int id) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f), _oldId(id) {
+	Vertex(int id, double f, int d) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f), _oldId(id) {
 		_drift = Vector(d, 1); _drift.setZero();
 		_lattice = Lattice(d);
 		_events.clear();
@@ -292,6 +292,9 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 		x = a.source(), y = a.target();
 		r = vertices[x].root(), s = vertices[y].root();
 		if (r == s) { // catenation
+#ifdef debuging
+			printf("\n** catenation %d -> %d\n", x, y);
+#endif
 			Lattice<integer> L(vertices[x].drift() + a.shift() - vertices[y].drift());
 			vertices[r].lattice() += L;
 			// compute shadow monomial, insert new event
@@ -299,7 +302,6 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 			vol_p = Volume(inputBasis, vertices[r].lattice());
 			vertices[r].events().push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
-			printf("\n** catenation %d -> %d\n", x, y);
 			cout << "v:\n" << L.basis() << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
@@ -307,10 +309,13 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 #endif
 		}
 		else { // merger
+#ifdef debuging
+			printf("\n** merger %d -> %d\n", x, y);
+#endif
 			// make sure size(s) <= size(r)
 			if (vertices[r].size() < vertices[s].size()) {
-				exchange(r, s);
-				exchange(x, y);
+				swap(r, s);
+				swap(x, y);
 			}
 			if (vertices[r].old() > vertices[s].old()) {
 				vertices[r].old() = vertices[s].old();
@@ -333,7 +338,6 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 			vol_p = Volume(inputBasis, vertices[r].lattice());
 			vertices[r].events().push_back(Event(time, s, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
-			printf("\n** merger %d -> %d\n", x, y);
 			cout << "v:\n" << v << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
@@ -451,121 +455,77 @@ void simpleDfs(VertexList& vertices, int root) {
 	}
 }
 
-void run2DExample_1() {
-	int d = 2;
+// run example from file
+void runExample(const char *filename) {
+	int d, n, m;
 	typedef Matrix<integer, Dynamic, 1> Vector;
 	typedef Matrix<double, Dynamic, Dynamic> Matrix;
 	typedef Vertex<integer> Vertex;
 	typedef Arc<integer> Arc;
 
+	FILE* fp;
+	fopen_s(&fp, filename, "r");
+	if (!fp) {
+		throw std::invalid_argument("cannot open file");
+		return;
+	}
+
+	const int buffer = 1000;
+	char s[buffer];
+
+	// dimension
+	fgets(s, buffer, fp);
+	fgets(s, buffer, fp);
+	sscanf_s(s, "%d", &d);
+	printf("dimension: %d\n", d);
+
+	// lattice basis
+	fgets(s, buffer, fp);
 	Matrix U(d, d);
-	U << 1, 0, 
-		 0, 1;
+	for (int i = 0; i < d; ++i) {
+		for (int j = 0; j < d; ++j) {
+			double x;
+			fscanf_s(fp, "%lf ", &U(i,j));
+		}
+	}
 	inputVolumeInv = 1.0 / abs(U.determinant());
+	cout << "lattice:\n" << U << endl;
+	printf("volume: %.3f\n", 1.0 / inputVolumeInv);
 
-	vector<Vertex> vertices;
-	vertices.push_back(Vertex(1, d, 0));
-	vertices.push_back(Vertex(3, d, 1));
+	// vertices
+	fgets(s, buffer, fp);
+	printf("vertices:\n");
+	vector<Vertex> vertices(1);
+	int id;
+	double f;
+	fscanf_s(fp, "%d", &n);
+	for (int i = 0; i < n; ++i) {
+		fscanf_s(fp, "%d %lf ", &id, &f);
+		vertices.push_back(Vertex(id, f, d));
+		printf("%d: %.3f\n", vertices.back().root(), vertices.back().filtration());
+	}
 
+	// arcs
+	fgets(s, buffer, fp);
+	printf("arcs:\n");
 	vector<Arc> arcs;
-	arcs.push_back(Arc(5, 0, 1, d));
+	int source, target;
 	Vector shift(d, 1);
-	shift << 1, 0;
-	arcs.push_back(Arc(9, 1, 0, shift));
-	shift << 1, 1;
-	arcs.push_back(Arc(7, 1, 0, shift));
+	fscanf_s(fp, "%d", &m);
+	for (int i = 0; i < m; ++i) {
+		fscanf_s(fp, "%d %d %lf ", &source, &target, &f);
+		for (int j = 0; j < d; ++j) {
+			fscanf_s(fp, "%d ", &shift(j, 0));
+		}
+		arcs.push_back(Arc(source, target, f, shift));
+		printf("%d->%d: %.3f (", arcs.back().source(), arcs.back().target(), arcs.back().filtration());
+		for (int j = 0; j < d; ++j) {
+			printf("%d%c", arcs.back().shift()(j, 0), ",)"[j==d-1]);
+		}
+		printf("\n");
+	}
 
-	process(d, U, vertices, arcs);
-
-	int root = vertices[0].root();
-	printf("\nperiodic merge tree:\n");
-#ifdef simpledfs
-	simpleDfs(vertices, root);
-#else
-	vector<Event> succEvents(0);
-	dfs(vertices, succEvents, root);
-#endif
-}
-
-void run2DExample_2() {
-	int d = 2;
-	typedef Matrix<integer, Dynamic, 1> Vector;
-	typedef Matrix<double, Dynamic, Dynamic> Matrix;
-	typedef Vertex<integer> Vertex;
-	typedef Arc<integer> Arc;
-
-	Matrix U(d, d);
-	U << 1, 0, 
-		 0, 2;
-	inputVolumeInv = 1.0 / abs(U.determinant());
-
-	vector<Vertex> vertices;
-	vertices.push_back(Vertex(1, d, 0));
-	vertices.push_back(Vertex(3, d, 1));
-	vertices.push_back(Vertex(1, d, 2));
-	vertices.push_back(Vertex(3, d, 3));
-
-	vector<Arc> arcs;
-	arcs.push_back(Arc(5, 0, 1, d));
-	arcs.push_back(Arc(9, 1, 2, d));
-	arcs.push_back(Arc(5, 2, 3, d));
-	Vector shift(d, 1);
-	shift << 0, 1;
-	arcs.push_back(Arc(7, 1, 2, shift));
-	shift << 1, 1;
-	arcs.push_back(Arc(7, 3, 0, shift));
-	shift << 1, 0;
-	arcs.push_back(Arc(9, 3, 0, shift));
-
-	process(d, U, vertices, arcs);
-
-	int root = vertices[0].root();
-	printf("\nperiodic merge tree:\n");
-#ifdef simpledfs
-	simpleDfs(vertices, root);
-#else
-	vector<Event> succEvents(0);
-	dfs(vertices, succEvents, root);
-#endif
-}
-
-void run3DExample_1() {
-	int d = 3;
-	typedef Matrix<integer, Dynamic, 1> Vector;
-	typedef Matrix<double, Dynamic, Dynamic> Matrix;
-	typedef Vertex<integer> Vertex;
-	typedef Arc<integer> Arc;
-
-	Matrix U(d, d);
-	U << 1, 0, 0,
-		 0, 1, 0,
-		 0, 0, 1;
-	inputVolumeInv = 1.0 / abs(U.determinant());
-
-	vector<Vertex> vertices;
-	vertices.push_back(Vertex());
-	vertices.push_back(Vertex(1, d, 1));
-	vertices.push_back(Vertex(2, d, 2));
-	vertices.push_back(Vertex(3, d, 3));
-	vertices.push_back(Vertex(4, d, 4));
-	vertices.push_back(Vertex(5, d, 5));
-
-	vector<Arc> arcs;
-	Vector shift(d, 1);
-	arcs.push_back(Arc(13, 1, 2, d));
-	shift << 1, 0, 0;
-	arcs.push_back(Arc(12, 1, 2, shift));
-	shift << 1, 1, 0;
-	arcs.push_back(Arc(6, 2, 2, shift));
-	arcs.push_back(Arc(10, 2, 4, d));
-	arcs.push_back(Arc(7, 4, 3, d));
-	shift << 1, 0, 0;
-	arcs.push_back(Arc(8, 4, 5, shift));
-	shift << 1, 0, 0;
-	arcs.push_back(Arc(9, 5, 3, shift));
-	shift << 0, 0, 1;
-	arcs.push_back(Arc(11, 3, 3, shift));
-
+	// run algorithm
 	process(d, U, vertices, arcs);
 
 	int root = vertices[1].root();
@@ -580,7 +540,7 @@ void run3DExample_1() {
 
 int main()
 {
-	//run2DExample_1();
-	//run2DExample_2();
-	run3DExample_1();
+	//runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
+	//runExample("C:/_/Project/periodica/examples/example_2d_2.txt");
+	runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
 }

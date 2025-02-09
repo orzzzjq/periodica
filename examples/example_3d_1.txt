@@ -1,0 +1,25 @@
+dimension:
+3
+lattice:
+1 0 0
+0 1 0
+0 0 1
+vertices: // index, filtration
+5
+1 1.0
+2 2.0
+3 3.0
+4 4.0
+5 5.0
+arcs: // source, target, filtration, shift
+8
+1 2 12.0 1 0 0
+1 2 13.0 0 0 0
+2 2 6.0 1 1 0
+2 4 10.0 0 0 0
+4 5 8.0 1 0 0
+4 3 7.0 0 0 0
+5 3 9.0 1 0 0
+3 3 11.0 0 0 1
+
+
