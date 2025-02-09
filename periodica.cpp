@@ -3,7 +3,8 @@
 #include <string>
 #include <Eigen/Dense>
 
-#define debuging
+//#define debuging
+//#define simpledfs
 
 using namespace Eigen;
 
@@ -154,7 +155,7 @@ double Volume(const Matrix& U, const Lattice& L) {
 }
 
 const double pi = acos(-1.0);
-std::vector<double> unitBallVolume = { 1, 2, pi, 4 * pi / 3 };
+std::vector<double> unitBallVolume = { 1, 2, 1, 4.0 / 3 };
 
 class Event {
 private:
@@ -171,7 +172,7 @@ public:
 		: _time(time), _child(child), _coefficient(ratio * unitBallVolume[exponent]), _exponent(exponent) {}
 
 	double time() { return _time; }
-	int child() { return _child; }
+	int& child() { return _child; }
 	double frequency() const { return _coefficient; }
 	int dimension() const { return _exponent; }
 
@@ -184,7 +185,7 @@ public:
 
 	std::string toString() {
 		char s[50];
-		sprintf_s(s, "%.3f R^%d", _coefficient, _exponent);
+		sprintf_s(s, "%.3f %sR^%d", _coefficient, (_exponent > 1 ? "pi " : ""), _exponent);
 		return std::string(s);
 	}
 };
@@ -238,6 +239,7 @@ private:
 	int _root, _next; // indices of root, next. -1 for null.
 	int _size; // size of subtree
 	double _old; // birth time of the oldest child
+	int _oldId; // index of the oldest child
 	Vector _drift; // the drift vector
 	Lattice _lattice; // the periodic lattice
 
@@ -246,14 +248,14 @@ private:
 	std::vector<Event> _events; 
 
 public:
-	Vertex() : Simplex(0, 0), _root(0), _next(-1), _size(1), _old(0.0) {
+	Vertex() : Simplex(0, 0), _root(0), _next(-1), _size(1), _old(0.0), _oldId(0) {
 		_drift = Vector(0, 1);
 		_lattice = Lattice(_drift);
 		_events.clear();
 	}
 
 	// construct with filtration value, dimensionality, and index
-	Vertex(double f, int d, int id) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f) {
+	Vertex(double f, int d, int id) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f), _oldId(id) {
 		_drift = Vector(d, 1); _drift.setZero();
 		_lattice = Lattice(d);
 		_events.clear();
@@ -264,6 +266,7 @@ public:
 	int& next() { return _next; }
 	int& size() { return _size; }
 	double& old() { return _old; }
+	int& oldId() { return _oldId; }
 	Vector& drift() { return _drift; }
 	Lattice& lattice() { return _lattice; }
 	std::vector<Event>& events() { return _events; }
@@ -309,7 +312,10 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 				exchange(r, s);
 				exchange(x, y);
 			}
-			vertices[r].old() = min(vertices[r].old(), vertices[s].old());
+			if (vertices[r].old() > vertices[s].old()) {
+				vertices[r].old() = vertices[s].old();
+				vertices[r].oldId() = vertices[s].oldId();
+			}
 			vertices[r].lattice() += vertices[s].lattice();
 			auto v = vertices[x].drift() + a.shift() - vertices[y].drift();
 			z = s;
@@ -337,12 +343,79 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 	}
 }
 
+template <typename VertexList, typename EventList>
+void dfs(VertexList& vertices, EventList& succEvents, int root) {
+	int i, j;
+	auto events = vertices[root].events();
+
+	// find a index list with monotonically increasing birth time
+	vector<pair<int, int>> older; // {index in events list, index in vertices list}
+	for (i = events.size() - 1; i >= 0; --i) {
+		if (events[i].child() != -1) {
+			int c = events[i].child();
+			// monotonic stack
+			while (older.size() && (vertices[c].old() < vertices[older.back().second].old())) {
+				older.pop_back();
+			}
+			older.push_back({ i, c });
+		}
+	}
+	while (older.size() && (vertices[root].filtration() < vertices[older.back().second].old())) {
+		older.pop_back();
+	}
+	older.push_back({ 0, root });
+
+	// transplant the successor events to older child
+	j = events.size() - 1;
+	for (i = 0; i < older.size(); ++i) {
+		for (; j >= older[i].first; --j) {
+			succEvents.push_back(events[j]);
+		}
+		if (older[i].second == root) continue;
+		else {
+			if (i < older.size() - 2) {
+				succEvents.back().child() = vertices[older[i + 1].second].oldId();
+			}
+			else {
+				succEvents.back().child() = root;
+			}
+		}
+		dfs(vertices, succEvents, older[i].second);
+	}
+
+	// print events
+	printf("%d:\n", root);
+	for (i = succEvents.size() - 1; i >= 0; --i) {
+		if (i > 0 && succEvents[i].time() == succEvents[i - 1].time()) continue;
+		auto event = succEvents[i];
+		printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
+		if (event.child() != -1) {
+			printf(", child: %d", event.child());
+		}
+		printf("\n");
+	}
+	succEvents.clear();
+
+	// handle unvisited children
+	j = 0;
+	for (i = events.size() - 1; i >= 0; --i) {
+		if (events[i].child() != -1) {
+			if (events[i].child() == older[j].second) {
+				++j;
+			}
+			else {
+				dfs(vertices, succEvents, events[i].child());
+			}
+		}
+	}
+}
+
 template <typename VertexList>
-void dfs(VertexList& vertices, int root) {
-	printf("%d :\n", root);
+void simpleDfs(VertexList& vertices, int root) {
+	printf("%d:\n", root);
 	auto events = vertices[root].events();
 	for (int i = 0; i < events.size(); ++i) {
-		//if (i < events.size() - 1 && events[i].time() == events[i + 1].time()) continue;
+		if (i < events.size() - 1 && events[i].time() == events[i + 1].time()) continue;
 		auto event = events[i];
 		printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
 		if (event.child() != -1) {
@@ -350,9 +423,30 @@ void dfs(VertexList& vertices, int root) {
 		}
 		printf("\n");
 	}
+#ifdef debuging
+	// find a index list with monotonically increasing birth time
+	vector<pair<int, int>> older; // {index in events list, index in vertices list}
+	for (int i = events.size() - 1; i >= 0; --i) {
+		if (events[i].child() != -1) {
+			int c = events[i].child();
+			// monotonic stack
+			while (older.size() && (vertices[c].old() < vertices[older.back().second].old())) {
+				older.pop_back();
+			}
+			older.push_back({ i, c });
+		}
+	}
+	while (older.size() && (vertices[root].filtration() < vertices[older.back().second].old())) {
+		older.pop_back();
+	}
+	older.push_back({ 0, root });
+	printf("*older: ");
+	for (auto x : older) printf("%d ", x.second);
+	printf("\n");
+#endif
 	for (auto event : events) {
 		if (event.child() != -1) {
-			dfs(vertices, event.child());
+			simpleDfs(vertices, event.child());
 		}
 	}
 }
@@ -365,7 +459,8 @@ void run2DExample_1() {
 	typedef Arc<integer> Arc;
 
 	Matrix U(d, d);
-	U << 1, 0, 0, 1;
+	U << 1, 0, 
+		 0, 1;
 	inputVolumeInv = 1.0 / abs(U.determinant());
 
 	vector<Vertex> vertices;
@@ -384,7 +479,12 @@ void run2DExample_1() {
 
 	int root = vertices[0].root();
 	printf("\nperiodic merge tree:\n");
-	dfs(vertices, root);
+#ifdef simpledfs
+	simpleDfs(vertices, root);
+#else
+	vector<Event> succEvents(0);
+	dfs(vertices, succEvents, root);
+#endif
 }
 
 void run2DExample_2() {
@@ -395,7 +495,8 @@ void run2DExample_2() {
 	typedef Arc<integer> Arc;
 
 	Matrix U(d, d);
-	U << 1, 0, 0, 2;
+	U << 1, 0, 
+		 0, 2;
 	inputVolumeInv = 1.0 / abs(U.determinant());
 
 	vector<Vertex> vertices;
@@ -420,7 +521,12 @@ void run2DExample_2() {
 
 	int root = vertices[0].root();
 	printf("\nperiodic merge tree:\n");
-	dfs(vertices, root);
+#ifdef simpledfs
+	simpleDfs(vertices, root);
+#else
+	vector<Event> succEvents(0);
+	dfs(vertices, succEvents, root);
+#endif
 }
 
 void run3DExample_1() {
@@ -464,10 +570,17 @@ void run3DExample_1() {
 
 	int root = vertices[1].root();
 	printf("\nperiodic merge tree:\n");
-	dfs(vertices, root);
+#ifdef simpledfs
+	simpleDfs(vertices, root);
+#else
+	vector<Event> succEvents(0);
+	dfs(vertices, succEvents, root);
+#endif
 }
 
 int main()
 {
+	//run2DExample_1();
+	//run2DExample_2();
 	run3DExample_1();
 }
