@@ -6,6 +6,12 @@
 //#define debuging
 //#define simpledfs
 
+#ifdef debuging
+#define debug(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__);
+#else
+#define debug(fmt, ...) ;
+#endif
+
 using namespace Eigen;
 
 // inverse of volume of input lattice, serve as multiplier for shadow monomial coefficient
@@ -161,31 +167,36 @@ class Event {
 private:
 	double _time; // time of the event
 	int _child; // if it's a merger event, record the root of the child component. -1 for null.
-	double _coefficient; // coefficient of the shadow monomial
+	double _ratio; // vol_p / vol_d
 	int _exponent; // exponent of the shadow monomial
 
 public:
-	Event() : _time(0), _child(-1), _coefficient(0), _exponent(0) {}
+	Event() : _time(0), _child(-1), _ratio(1), _exponent(0) {}
 
 	// notice that the second parameter is vol(periodic lattice) / vol(input lattice), instead of real coefficient
 	Event(double time, int child, double ratio, int exponent)
-		: _time(time), _child(child), _coefficient(ratio * unitBallVolume[exponent]), _exponent(exponent) {}
+		: _time(time), _child(child), _ratio(ratio), _exponent(exponent) {}
 
-	double time() { return _time; }
+	double& time() { return _time; }
 	int& child() { return _child; }
-	double frequency() const { return _coefficient; }
-	int dimension() const { return _exponent; }
+	double ratio() const { return _ratio; }
+	int exponent() const { return _exponent; }
 
-	void setValue(double time, int child, double ratio, int exponenet) {
-		_time = time;
-		_child = child;
-		_coefficient = ratio * unitBallVolume[exponenet];
-		_exponent = exponenet;
+	bool operator==(const Event& other) const {
+		if (_exponent != other.exponent()) return false;
+		if (abs(_ratio - other.ratio()) < 1e-9) return true;
+		return false;
+	}
+
+	bool operator>(const Event& other) const {
+		if (_exponent > other.exponent()) return true;
+		if (_ratio - other.ratio() >= 1e-9) return true;
+		return false;
 	}
 
 	std::string toString() {
 		char s[50];
-		sprintf_s(s, "%.3f %sR^%d", _coefficient, (_exponent > 1 ? "¦Ð" : ""), _exponent);
+		sprintf_s(s, "%.3f %sR^%d", _ratio * unitBallVolume[_exponent], (_exponent > 1 ? "¦Ð" : ""), _exponent);
 		return std::string(s);
 	}
 };
@@ -226,7 +237,7 @@ public:
 
 	int source() { return _source; }
 	int target() { return _target; }
-	Vector& shift() { return _shift; }
+	Vector shift() const { return _shift; }
 };
 
 
@@ -262,6 +273,10 @@ public:
 		_events.push_back(Event(f, -1, inputVolumeInv, d)); // record birth of vertex
 	}
 
+	void driftAdd(const Vector& v) {
+		_drift += v;
+	}
+
 	int& root() { return _root; }
 	int& next() { return _next; }
 	int& size() { return _size; }
@@ -272,19 +287,20 @@ public:
 	std::vector<Event>& events() { return _events; }
 };
 
-struct comparator {
+typedef int integer;
+
+using namespace std;
+
+struct filtrationComparator {
 	bool operator()(Simplex& a, Simplex& b) const {
 		return a.filtration() < b.filtration();
 	}
 };
 
-typedef int integer;
-
-using namespace std;
-
 template <typename Matrix, typename VertexList, typename ArcList>
 void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
-	std::sort(begin(arcs), end(arcs), comparator());
+	std::sort(begin(arcs), end(arcs), filtrationComparator());
+
 	int x, y, r, s, z, last, p;
 	double time = 0, vol_p;
 	for (auto a : arcs) {
@@ -302,6 +318,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 			vol_p = Volume(inputBasis, vertices[r].lattice());
 			vertices[r].events().push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
+			cout << "time: " << time << endl;
 			cout << "v:\n" << L.basis() << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
@@ -322,7 +339,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 				vertices[r].oldId() = vertices[s].oldId();
 			}
 			vertices[r].lattice() += vertices[s].lattice();
-			auto v = vertices[x].drift() + a.shift() - vertices[y].drift();
+			Eigen::Matrix<integer, Dynamic, 1> v(vertices[x].drift() + a.shift() - vertices[y].drift());
 			z = s;
 			while (z != -1) {
 				vertices[z].root() = r;
@@ -338,6 +355,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 			vol_p = Volume(inputBasis, vertices[r].lattice());
 			vertices[r].events().push_back(Event(time, s, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
+			cout << "time: " << time << endl;
 			cout << "v:\n" << v << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
@@ -348,7 +366,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 }
 
 template <typename VertexList, typename EventList>
-void dfs(VertexList& vertices, EventList& succEvents, int root) {
+void dfs(int root, VertexList& vertices, EventList& succEvents, vector<EventList>& beams) {
 	int i, j;
 	auto events = vertices[root].events();
 
@@ -384,19 +402,13 @@ void dfs(VertexList& vertices, EventList& succEvents, int root) {
 				succEvents.back().child() = root;
 			}
 		}
-		dfs(vertices, succEvents, older[i].second);
+		dfs(older[i].second, vertices, succEvents, beams);
 	}
 
-	// print events
-	printf("%d:\n", root);
+	// construct beam
 	for (i = succEvents.size() - 1; i >= 0; --i) {
 		if (i > 0 && succEvents[i].time() == succEvents[i - 1].time()) continue;
-		auto event = succEvents[i];
-		printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
-		if (event.child() != -1) {
-			printf(", child: %d", event.child());
-		}
-		printf("\n");
+		beams[root].push_back(succEvents[i]);
 	}
 	succEvents.clear();
 
@@ -408,7 +420,7 @@ void dfs(VertexList& vertices, EventList& succEvents, int root) {
 				++j;
 			}
 			else {
-				dfs(vertices, succEvents, events[i].child());
+				dfs(events[i].child(), vertices, succEvents, beams);
 			}
 		}
 	}
@@ -451,6 +463,126 @@ void simpleDfs(VertexList& vertices, int root) {
 	for (auto event : events) {
 		if (event.child() != -1) {
 			simpleDfs(vertices, event.child());
+		}
+	}
+}
+
+// append last event to the beams that merged to other beams
+template <typename EventList>
+void addRightEnd(vector<EventList>& beams) {
+	for (int i = 1; i < beams.size(); ++i) {
+		for (auto event : beams[i]) {
+			if (event.child() != -1 && event.child() != i) {
+				beams[event.child()].push_back(event);
+			}
+		}
+	}
+}
+
+// print periodic merge tree
+template <typename EventList>
+void printBeams(vector<EventList>& beams) {
+	for (int i = 1; i < beams.size(); ++i) {
+		printf("%d:\n", i);
+		for (auto event : beams[i]) {
+			if (event.child() == i) continue;
+			printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
+			if (event.child() != -1) {
+				printf(", child: %d", event.child());
+			}
+			printf("\n");
+		}
+	}
+}
+
+class Barcode {
+private:
+	double _birth, _death, _multiplicity;
+public:
+	Barcode() : _birth(std::numeric_limits<double>::lowest()), _death(std::numeric_limits<double>::max()), _multiplicity(0) {}
+	Barcode(double birth, double death, double multiplicity)
+		: _birth(birth), _death(death), _multiplicity(multiplicity) {}
+
+	double birth() { return _birth; }
+	double death() { return _death; }
+	double multiplicity() { return _multiplicity; }
+
+	std::string toString() {
+		char s[100];
+		if (_death == std::numeric_limits<double>::max()) {
+			sprintf_s(s, "[%.3f, +inf) %.3f", _birth, _multiplicity);
+		}
+		else {
+			sprintf_s(s, "[%.3f, %.3f] %.3f", _birth, _death, _multiplicity);
+		}
+		return std::string(s);
+	}
+};
+
+
+struct barcodeComparator {
+	bool operator()(Barcode& a, Barcode& b) {
+		if (a.birth() < b.birth()) return true;
+		else if (a.birth() == b.birth()) return a.death() < b.death();
+		else return false;
+	}
+};
+
+// print barcode in different eras
+template <typename EventList>
+void printBarcodes(int d, vector<EventList>& beams) {
+	vector<vector<Barcode>> barcodes(d + 1);
+	int i, j, k;
+	double birth, death;
+	const double inf = double(std::numeric_limits<double>::max());
+	for (i = 1; i < beams.size(); ++i) {
+		EventList& epoch = beams[i];
+		debug("%d: %d epoches\n", i, epoch.size());
+		birth = epoch[0].time();
+		for (j = 0; j < epoch.size(); ) {
+			debug(" %d time: %.3f monomial: %s child: %d, ", j, epoch[j].time(), epoch[j].toString().c_str(), epoch[j].child());
+			for (k = j + 1; k < epoch.size(); ++k) { // find the shadow monomial beam[k] > beam[j]
+				if (epoch[j] > epoch[k]) {
+					break;
+				}
+			}
+			if (k == epoch.size()) {
+				if (j == epoch.size() - 1 && epoch[j].child() != i) { // never die
+					debug("case 1");
+					barcodes[epoch[j].exponent()].push_back(Barcode(birth, inf, epoch[j].ratio()));
+				}
+				else { // merger with the same monomial
+					debug("case 2");
+					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch.back().time(), epoch[j].ratio()));
+				}
+			}
+			else {
+				if (epoch[j].exponent() != epoch[k].exponent()) { // different exponents, decompose into two
+					debug("case 3");
+					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio()));
+					barcodes[epoch[k].exponent()].push_back(Barcode(birth, epoch[k].time(), -epoch[k].ratio()));
+				}
+				else { // same exponent, (epoch[j].ratio() - epoch[k].ratio()) components dies
+					debug("case 4");
+					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio() - epoch[k].ratio()));
+				}
+			}
+			j = k;
+			debug("\n");
+		}
+	}
+	for (i = d; i >= 0; --i) {
+		printf("%d-th:\n", i);
+		sort(begin(barcodes[i]), end(barcodes[i]), barcodeComparator());
+		for (j = 0; j < barcodes[i].size(); ++j) {
+			if (j < barcodes[i].size() - 1 
+				&& barcodes[i][j].birth() == barcodes[i][j+1].birth() 
+				&& barcodes[i][j].death() == barcodes[i][j+1].death() 
+				&& barcodes[i][j].multiplicity() == -barcodes[i][j + 1].multiplicity()) {
+				j++;
+				continue;
+			}
+			printf(" %s\n", barcodes[i][j].toString().c_str());
 		}
 	}
 }
@@ -529,12 +661,18 @@ void runExample(const char *filename) {
 	process(d, U, vertices, arcs);
 
 	int root = vertices[1].root();
-	printf("\nperiodic merge tree:\n");
+	printf("\n\nperiodic merge tree:\n");
 #ifdef simpledfs
 	simpleDfs(vertices, root);
 #else
 	vector<Event> succEvents(0);
-	dfs(vertices, succEvents, root);
+	vector<vector<Event>> beams(n + 1);
+	dfs(root, vertices, succEvents, beams);
+	printBeams(beams);
+
+	printf("\nperiodic barcode:\n");
+	addRightEnd(beams);
+	printBarcodes(d, beams);
 #endif
 }
 
