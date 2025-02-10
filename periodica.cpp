@@ -1,10 +1,23 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <chrono>
+
 #include <Eigen/Dense>
 
 //#define debuging
+#define recordtime
 //#define simpledfs
+
+#ifdef recordtime
+auto start = std::chrono::high_resolution_clock::now();
+auto stop = std::chrono::high_resolution_clock::now();
+#define recordStart() start = std::chrono::high_resolution_clock::now();
+#define recordStop(x) stop = std::chrono::high_resolution_clock::now(); fprintf(stderr, "%s %dms ", (x), std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count());
+#else
+#define recordStart() ;
+#define recordStop(x) ;
+#endif
 
 #ifdef debuging
 #define debug(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__);
@@ -657,11 +670,12 @@ void runExample(const char *filename) {
 		printf("\n");
 	}
 
+	recordStart();
 	// run algorithm
 	process(d, U, vertices, arcs);
 
 	int root = vertices[1].root();
-	printf("\n\nperiodic merge tree:\n");
+	printf("\nperiodic merge tree:\n");
 #ifdef simpledfs
 	simpleDfs(vertices, root);
 #else
@@ -674,11 +688,12 @@ void runExample(const char *filename) {
 	addRightEnd(beams);
 	printBarcodes(d, beams);
 #endif
+	recordStop("\nrunning time:");
 }
 
 int main()
 {
-	//runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
+	runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
 	//runExample("C:/_/Project/periodica/examples/example_2d_2.txt");
-	runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
+	//runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
 }
