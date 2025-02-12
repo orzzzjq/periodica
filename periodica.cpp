@@ -532,7 +532,7 @@ public:
 	}
 };
 
-
+// for sorting barcodes
 struct barcodeComparator {
 	bool operator()(Barcode& a, Barcode& b) {
 		if (a.birth() < b.birth()) return true;
@@ -670,7 +670,6 @@ void runExample(const char *filename) {
 		printf("\n");
 	}
 
-	recordStart();
 	// run algorithm
 	process(d, U, vertices, arcs);
 
@@ -688,12 +687,13 @@ void runExample(const char *filename) {
 	addRightEnd(beams);
 	printBarcodes(d, beams);
 #endif
-	recordStop("\nrunning time:");
 }
 
 int main()
 {
-	runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
+	//runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
 	//runExample("C:/_/Project/periodica/examples/example_2d_2.txt");
-	//runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
+	recordStart();
+	runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
+	recordStop("\nrunning time:");
 }
