@@ -6,9 +6,13 @@
 #include <Eigen/Dense>
 
 //#define debuging
-#define recordtime
-//#define simpledfs
+#ifdef debuging
+#define debug(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__);
+#else
+#define debug(fmt, ...) ;
+#endif
 
+#define recordtime
 #ifdef recordtime
 auto start = std::chrono::high_resolution_clock::now();
 auto stop = std::chrono::high_resolution_clock::now();
@@ -17,12 +21,6 @@ auto stop = std::chrono::high_resolution_clock::now();
 #else
 #define recordStart() ;
 #define recordStop(x) ;
-#endif
-
-#ifdef debuging
-#define debug(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__);
-#else
-#define debug(fmt, ...) ;
 #endif
 
 using namespace Eigen;
@@ -267,23 +265,16 @@ private:
 	Vector _drift; // the drift vector
 	Lattice _lattice; // the periodic lattice
 
-	// record the changes of shadow monomial (including the corresponding 
-	// time and also the index to child component if it's a merger)
-	std::vector<Event> _events; 
-
 public:
 	Vertex() : Simplex(0, 0), _root(0), _next(-1), _size(1), _old(0.0), _oldId(0) {
 		_drift = Vector(0, 1);
 		_lattice = Lattice(_drift);
-		_events.clear();
 	}
 
 	// construct with filtration value, dimensionality, and index
 	Vertex(int id, double f, int d) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f), _oldId(id) {
 		_drift = Vector(d, 1); _drift.setZero();
 		_lattice = Lattice(d);
-		_events.clear();
-		_events.push_back(Event(f, -1, inputVolumeInv, d)); // record birth of vertex
 	}
 
 	void driftAdd(const Vector& v) {
@@ -297,7 +288,6 @@ public:
 	int& oldId() { return _oldId; }
 	Vector& drift() { return _drift; }
 	Lattice& lattice() { return _lattice; }
-	std::vector<Event>& events() { return _events; }
 };
 
 typedef int integer;
@@ -310,16 +300,24 @@ struct filtrationComparator {
 	}
 };
 
-template <typename Matrix, typename VertexList, typename ArcList>
-void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
+template <typename Matrix, typename VertexList, typename ArcList, typename EventList>
+void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vector<EventList>& beams) {
+	// record birth events for each vertex
+	for (auto v : vertices) {
+		beams[v.root()].push_back(Event(v.old(), -1, inputVolumeInv, d));
+	}
+
+	// sort the arcs in non-decreasing order
 	std::sort(begin(arcs), end(arcs), filtrationComparator());
 
-	int x, y, r, s, z, last, p;
+	// union-find algorithm for PMT
+	int x, y, r, s, z, last, p, rOldId, sOldId;
 	double time = 0, vol_p;
 	for (auto a : arcs) {
 		time = a.filtration();
 		x = a.source(), y = a.target();
 		r = vertices[x].root(), s = vertices[y].root();
+		rOldId = vertices[r].oldId(), sOldId = vertices[s].oldId();
 		if (r == s) { // catenation
 #ifdef debuging
 			printf("\n** catenation %d -> %d\n", x, y);
@@ -329,20 +327,24 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 			// compute shadow monomial, insert new event
 			p = vertices[r].lattice().size();
 			vol_p = Volume(inputBasis, vertices[r].lattice());
-			vertices[r].events().push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
+			beams[rOldId].push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
 			cout << "time: " << time << endl;
 			cout << "v:\n" << L.basis() << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
-			cout << "monomial: " << vertices[r].events().back().toString() << endl;
+			cout << "monomial: " << beams[rOldId].back().toString() << endl;
 #endif
 		}
 		else { // merger
 #ifdef debuging
 			printf("\n** merger %d -> %d\n", x, y);
 #endif
-			// make sure size(s) <= size(r)
+			// record index of oldest vertex in both components
+			if (vertices[r].old() > vertices[s].old()) {
+				swap(rOldId, sOldId);
+			}
+			// make sure size(s) <= size(r), and merge s -> r
 			if (vertices[r].size() < vertices[s].size()) {
 				swap(r, s);
 				swap(x, y);
@@ -366,116 +368,15 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs) {
 			// update shadow monomial, insert new event
 			p = vertices[r].lattice().size();
 			vol_p = Volume(inputBasis, vertices[r].lattice());
-			vertices[r].events().push_back(Event(time, s, vol_p * inputVolumeInv, d - p));
+			beams[rOldId].push_back(Event(time, sOldId, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
 			cout << "time: " << time << endl;
 			cout << "v:\n" << v << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
-			cout << "monomial: " << vertices[r].events().back().toString() << endl;
+			cout << "merge " << vertices[s].oldId() << " -> " << vertices[r].oldId() << endl;
+			cout << "monomial: " << beams[rOldId].back().toString() << endl;
 #endif
-		}
-	}
-}
-
-template <typename VertexList, typename EventList>
-void dfs(int root, VertexList& vertices, EventList& succEvents, vector<EventList>& beams) {
-	int i, j;
-	auto events = vertices[root].events();
-
-	// find a index list with monotonically increasing birth time
-	vector<pair<int, int>> older; // {index in events list, index in vertices list}
-	for (i = events.size() - 1; i >= 0; --i) {
-		if (events[i].child() != -1) {
-			int c = events[i].child();
-			// monotonic stack
-			while (older.size() && (vertices[c].old() < vertices[older.back().second].old())) {
-				older.pop_back();
-			}
-			older.push_back({ i, c });
-		}
-	}
-	while (older.size() && (vertices[root].filtration() < vertices[older.back().second].old())) {
-		older.pop_back();
-	}
-	older.push_back({ 0, root });
-
-	// transplant the successor events to older child
-	j = events.size() - 1;
-	for (i = 0; i < older.size(); ++i) {
-		for (; j >= older[i].first; --j) {
-			succEvents.push_back(events[j]);
-		}
-		if (older[i].second == root) continue;
-		else {
-			if (i < older.size() - 2) {
-				succEvents.back().child() = vertices[older[i + 1].second].oldId();
-			}
-			else {
-				succEvents.back().child() = root;
-			}
-		}
-		dfs(older[i].second, vertices, succEvents, beams);
-	}
-
-	// construct beam
-	for (i = succEvents.size() - 1; i >= 0; --i) {
-		if (i > 0 && succEvents[i].time() == succEvents[i - 1].time()) continue;
-		beams[root].push_back(succEvents[i]);
-	}
-	succEvents.clear();
-
-	// handle unvisited children
-	j = 0;
-	for (i = events.size() - 1; i >= 0; --i) {
-		if (events[i].child() != -1) {
-			if (events[i].child() == older[j].second) {
-				++j;
-			}
-			else {
-				dfs(events[i].child(), vertices, succEvents, beams);
-			}
-		}
-	}
-}
-
-template <typename VertexList>
-void simpleDfs(VertexList& vertices, int root) {
-	printf("%d:\n", root);
-	auto events = vertices[root].events();
-	for (int i = 0; i < events.size(); ++i) {
-		if (i < events.size() - 1 && events[i].time() == events[i + 1].time()) continue;
-		auto event = events[i];
-		printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
-		if (event.child() != -1) {
-			printf(", child: %d", event.child());
-		}
-		printf("\n");
-	}
-#ifdef debuging
-	// find a index list with monotonically increasing birth time
-	vector<pair<int, int>> older; // {index in events list, index in vertices list}
-	for (int i = events.size() - 1; i >= 0; --i) {
-		if (events[i].child() != -1) {
-			int c = events[i].child();
-			// monotonic stack
-			while (older.size() && (vertices[c].old() < vertices[older.back().second].old())) {
-				older.pop_back();
-			}
-			older.push_back({ i, c });
-		}
-	}
-	while (older.size() && (vertices[root].filtration() < vertices[older.back().second].old())) {
-		older.pop_back();
-	}
-	older.push_back({ 0, root });
-	printf("*older: ");
-	for (auto x : older) printf("%d ", x.second);
-	printf("\n");
-#endif
-	for (auto event : events) {
-		if (event.child() != -1) {
-			simpleDfs(vertices, event.child());
 		}
 	}
 }
@@ -498,10 +399,10 @@ void printBeams(vector<EventList>& beams) {
 	for (int i = 1; i < beams.size(); ++i) {
 		printf("%d:\n", i);
 		for (auto event : beams[i]) {
-			if (event.child() == i) continue;
 			printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
 			if (event.child() != -1) {
-				printf(", child: %d", event.child());
+				if (event.child() == i) printf(", dies");
+				else printf(", child: %d", event.child());
 			}
 			printf("\n");
 		}
@@ -543,11 +444,10 @@ struct barcodeComparator {
 
 // print barcode in different eras
 template <typename EventList>
-void printBarcodes(int d, vector<EventList>& beams) {
-	vector<vector<Barcode>> barcodes(d + 1);
+void constructBarcodes(vector<EventList>& beams, vector<vector<Barcode>>& barcodes) {
 	int i, j, k;
 	double birth, death;
-	const double inf = double(std::numeric_limits<double>::max());
+	constexpr double inf = std::numeric_limits<double>::max();
 	for (i = 1; i < beams.size(); ++i) {
 		EventList& epoch = beams[i];
 		debug("%d: %d epoches\n", i, epoch.size());
@@ -560,22 +460,26 @@ void printBarcodes(int d, vector<EventList>& beams) {
 				}
 			}
 			if (k == epoch.size()) {
-				if (j == epoch.size() - 1 && epoch[j].child() != i) { // never die
+				if (epoch[k - 1].child() != i) { 
+					// never die
 					debug("case 1");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, inf, epoch[j].ratio()));
 				}
-				else { // merger with the same monomial
+				else { 
+					// merger with the same monomial
 					debug("case 2");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch.back().time(), epoch[j].ratio()));
 				}
 			}
 			else {
-				if (epoch[j].exponent() != epoch[k].exponent()) { // different exponents, decompose into two
+				if (epoch[j].exponent() != epoch[k].exponent()) { 
+					// different exponents, split into different dimensions
 					debug("case 3");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio()));
 					barcodes[epoch[k].exponent()].push_back(Barcode(birth, epoch[k].time(), -epoch[k].ratio()));
 				}
-				else { // same exponent, (epoch[j].ratio() - epoch[k].ratio()) components dies
+				else { 
+					// same exponent, (epoch[j].ratio() - epoch[k].ratio()) components die
 					debug("case 4");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio() - epoch[k].ratio()));
 				}
@@ -584,17 +488,14 @@ void printBarcodes(int d, vector<EventList>& beams) {
 			debug("\n");
 		}
 	}
-	for (i = d; i >= 0; --i) {
+}
+
+void printBarcodes(vector<vector<Barcode>>& barcodes) { 
+	int i, j;
+	for (i = barcodes.size() - 1; i >= 0; --i) {
 		printf("%d-th:\n", i);
 		sort(begin(barcodes[i]), end(barcodes[i]), barcodeComparator());
 		for (j = 0; j < barcodes[i].size(); ++j) {
-			if (j < barcodes[i].size() - 1 
-				&& barcodes[i][j].birth() == barcodes[i][j+1].birth() 
-				&& barcodes[i][j].death() == barcodes[i][j+1].death() 
-				&& barcodes[i][j].multiplicity() == -barcodes[i][j + 1].multiplicity()) {
-				j++;
-				continue;
-			}
 			printf(" %s\n", barcodes[i][j].toString().c_str());
 		}
 	}
@@ -671,29 +572,28 @@ void runExample(const char *filename) {
 	}
 
 	// run algorithm
-	process(d, U, vertices, arcs);
-
-	int root = vertices[1].root();
-	printf("\nperiodic merge tree:\n");
-#ifdef simpledfs
-	simpleDfs(vertices, root);
-#else
-	vector<Event> succEvents(0);
 	vector<vector<Event>> beams(n + 1);
-	dfs(root, vertices, succEvents, beams);
+	process(d, U, vertices, arcs, beams);
+
+	// print PMT
+	printf("\nperiodic merge tree:\n");
+	addRightEnd(beams);
 	printBeams(beams);
 
+	// construct barcodes
+	vector<vector<Barcode>> barcodes(d + 1);
+	constructBarcodes(beams, barcodes);
+
+	// print barcodes
 	printf("\nperiodic barcode:\n");
-	addRightEnd(beams);
-	printBarcodes(d, beams);
-#endif
+	printBarcodes(barcodes);
 }
 
 int main()
 {
+	recordStart();
 	//runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
 	//runExample("C:/_/Project/periodica/examples/example_2d_2.txt");
-	recordStart();
 	runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
 	recordStop("\nrunning time:");
 }
