@@ -1,27 +1,11 @@
+#include "debug.h"
+#include "delaunay.h"
+
 #include <iostream>
 #include <vector>
 #include <string>
-#include <chrono>
 
 #include <Eigen/Dense>
-
-//#define debuging
-#ifdef debuging
-#define debug(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__);
-#else
-#define debug(fmt, ...) ;
-#endif
-
-#define recordtime
-#ifdef recordtime
-auto start = std::chrono::high_resolution_clock::now();
-auto stop = std::chrono::high_resolution_clock::now();
-#define recordStart() start = std::chrono::high_resolution_clock::now();
-#define recordStop(x) stop = std::chrono::high_resolution_clock::now(); fprintf(stderr, "%s %dms ", (x), std::chrono::duration_cast<std::chrono::milliseconds>(stop - start).count());
-#else
-#define recordStart() ;
-#define recordStop(x) ;
-#endif
 
 using namespace Eigen;
 
@@ -450,10 +434,10 @@ void constructBarcodes(vector<EventList>& beams, vector<vector<Barcode>>& barcod
 	constexpr double inf = std::numeric_limits<double>::max();
 	for (i = 1; i < beams.size(); ++i) {
 		EventList& epoch = beams[i];
-		debug("%d: %d epoches\n", i, epoch.size());
+		myDebug("%d: %d epoches\n", i, epoch.size());
 		birth = epoch[0].time();
 		for (j = 0; j < epoch.size(); ) {
-			debug(" %d time: %.3f monomial: %s child: %d, ", j, epoch[j].time(), epoch[j].toString().c_str(), epoch[j].child());
+			myDebug(" %d time: %.3f monomial: %s child: %d, ", j, epoch[j].time(), epoch[j].toString().c_str(), epoch[j].child());
 			for (k = j + 1; k < epoch.size(); ++k) { // find the shadow monomial beam[k] > beam[j]
 				if (epoch[j] > epoch[k]) {
 					break;
@@ -462,30 +446,30 @@ void constructBarcodes(vector<EventList>& beams, vector<vector<Barcode>>& barcod
 			if (k == epoch.size()) {
 				if (epoch[k - 1].child() != i) { 
 					// never die
-					debug("case 1");
+					myDebug("case 1");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, inf, epoch[j].ratio()));
 				}
 				else { 
 					// merger with the same monomial
-					debug("case 2");
+					myDebug("case 2");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch.back().time(), epoch[j].ratio()));
 				}
 			}
 			else {
 				if (epoch[j].exponent() != epoch[k].exponent()) { 
 					// different exponents, split into different dimensions
-					debug("case 3");
+					myDebug("case 3");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio()));
 					barcodes[epoch[k].exponent()].push_back(Barcode(birth, epoch[k].time(), -epoch[k].ratio()));
 				}
 				else { 
 					// same exponent, (epoch[j].ratio() - epoch[k].ratio()) components die
-					debug("case 4");
+					myDebug("case 4");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio() - epoch[k].ratio()));
 				}
 			}
 			j = k;
-			debug("\n");
+			myDebug("\n");
 		}
 	}
 }
@@ -589,7 +573,7 @@ void runExample(const char *filename) {
 	printBarcodes(barcodes);
 }
 
-int main()
+int xmain()
 {
 	recordStart();
 	//runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
