@@ -200,26 +200,97 @@ double LatticeDiameter(const Eigen::MatrixXd& U) {
     return max_dist;
 }
 
+Eigen::MatrixXd reducedBasis(const Eigen::MatrixXd& U) {
+    if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
+        throw std::invalid_argument("Input must be a 2x2 or 3x3 matrix");
+    }
 
-void generateBasis(const Eigen::MatrixXd& U, vector<Eigen::VectorXd>& V, int d, vector<int>& coeff) {
-    if (size(coeff) == d) {
-        Eigen::VectorXd v = Eigen::VectorXd::Zero(d);
-        bool allZero = 1;
-        for (int i = 0; i < d; ++i) {
-            if (coeff[i] != 0) {
-                allZero = 0;
-                v += coeff[i] * U.col(i);
+    int d = U.rows();
+    Eigen::MatrixXd V = Eigen::MatrixXd::Zero(d, d + 1);
+    for (int i = 0; i < d; ++i) {
+        V.col(i) = U.col(i);
+        V.col(d) -= U.col(i);
+    }
+
+    bool reduced = 1;
+    int i, j, h, k;
+    vector<vector<int>> id;
+
+    if (d == 2) {
+        id.push_back({0, 1, 2});
+        id.push_back({0, 2, 1});
+        id.push_back({1, 2, 0});
+        for (auto c : id) {
+            i = c[0], j = c[1], h = c[2];
+            if (V.col(i).dot(V.col(j)) > 0) {
+                reduced = 0;
+                break;
             }
         }
-        if (!allZero) V.push_back(v);
-        return;
+        while (!reduced) {
+            V.col(h) += V.col(i);
+            V.col(i) *= -1;
+            reduced = 1;
+            for (auto c : id) {
+                i = c[0], j = c[1], h = c[2];
+                if (V.col(i).dot(V.col(j)) > 0) {
+                    reduced = 0;
+                    break;
+                }
+            }
+        }
     }
-    for (int c = -1; c <= 1; ++c) {
-        coeff.push_back(c);
-        generateBasis(U, V, d, coeff);
-        coeff.pop_back();
+    else {
+        id.push_back({0, 1, 2, 3});
+        id.push_back({0, 2, 1, 3});
+        id.push_back({0, 3, 1, 2});
+        id.push_back({1, 2, 0, 3});
+        id.push_back({1, 3, 0, 2});
+        id.push_back({2, 3, 0, 1});
+        for (auto c : id) {
+            i = c[0], j = c[1], h = c[2], k = c[3];
+            if (V.col(i).dot(V.col(j)) > 0) {
+                reduced = 0;
+                break;
+            }
+        }
+        while (!reduced) {
+            V.col(h) += V.col(i);
+            V.col(k) += V.col(i);
+            V.col(i) *= -1;
+            reduced = 1;
+            for (auto c : id) {
+                i = c[0], j = c[1], h = c[2], k = c[3];
+                if (V.col(i).dot(V.col(j)) > 0) {
+                    reduced = 0;
+                    break;
+                }
+            }
+        }
     }
+
+    return V;
 }
+
+// void generateBasis(const Eigen::MatrixXd& U, vector<Eigen::VectorXd>& V, int d, vector<int>& coeff) {
+//     if (size(coeff) == d) {
+//         Eigen::VectorXd v = Eigen::VectorXd::Zero(d);
+//         bool allZero = 1;
+//         for (int i = 0; i < d; ++i) {
+//             if (coeff[i] != 0) {
+//                 allZero = 0;
+//                 v += coeff[i] * U.col(i);
+//             }
+//         }
+//         if (!allZero) V.push_back(v);
+//         return;
+//     }
+//     for (int c = -1; c <= 1; ++c) {
+//         coeff.push_back(c);
+//         generateBasis(U, V, d, coeff);
+//         coeff.pop_back();
+//     }
+// }
 
 pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(const Eigen::MatrixXd& U) {
     if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
@@ -227,18 +298,131 @@ pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(const Eigen::MatrixXd& U)
     }
 
     int d = U.rows();
-    vector<Eigen::VectorXd> V;
-    vector<int> coeff;
-    generateBasis(U, V, d, coeff);
 
-    Eigen::MatrixXd A(size(V), d);
-    Eigen::VectorXd b(size(V));
-    for (int i = 0; i < size(V); ++i) {
-        A.row(i) = V[i];
-        b(i) = V[i].norm() * V[i].norm() / 2;
+    Eigen::MatrixXd V = reducedBasis(U);
+
+    vector<Eigen::VectorXd> F; // face normals
+    
+    for (int mask = 1; mask < (1 << d); ++mask) {
+        Eigen::VectorXd u = Eigen::VectorXd::Zero(d);
+        Eigen::VectorXd v = Eigen::VectorXd::Zero(d);
+        for (int i = 0; i < d; ++i) {
+            if (mask & (1 << i)) { // plus minus
+                u += V.col(i);
+                v -= V.col(i);
+            }
+        }
+        F.push_back(u);
+        F.push_back(v);
+    }
+
+    Eigen::MatrixXd A(size(F), d);
+    Eigen::VectorXd b(size(F));
+    for (int i = 0; i < size(F); ++i) {
+        A.row(i) = F[i];
+        b(i) = F[i].norm() * F[i].norm() / 2;
     }
 
     return {A, b};
+}
+
+Eigen::MatrixXd canonicalPoints(const Eigen::MatrixXd& A, const Eigen::VectorXd& b, const Eigen::MatrixXd& points) {
+    if (A.cols() != points.rows() || (A.cols() != 2 && A.cols() != 3)) {
+        throw std::invalid_argument("Invalid input dimension");
+    }
+
+    vector<Eigen::VectorXd> cpoints;
+    Eigen::VectorXd p, v;
+    for (int i = 0; i < points.cols(); ++i) {
+        p = points.col(i);
+        int j = 0;
+        while (j < A.rows()) {
+            v = A.row(j);
+            double scal = p.dot(v) / (2 * b(j));
+            if (scal > (0.5 + 1e-9)) { // shift
+                p -= v * floor(scal + 0.5);
+                j = 0;
+            }
+            else {
+                ++j;
+            }
+        }
+        cpoints.push_back(p);
+    }
+
+    Eigen::MatrixXd result(points.rows(), size(cpoints));
+    for (int i = 0; i < size(cpoints); ++i) {
+        result.col(i) = cpoints[i];
+    }
+
+    return result;
+}
+
+pair<Eigen::MatrixXd, Eigen::MatrixXi> domainX3Points(const Eigen::MatrixXd V, const Eigen::MatrixXd& A, const Eigen::VectorXd& b, const Eigen::MatrixXd& canonical_points) {
+    if (A.cols() != canonical_points.rows() || (A.cols() != 2 && A.cols() != 3)) {
+        throw std::invalid_argument("Invalid input dimension");
+    }
+
+    vector<Eigen::VectorXd> points;
+    vector<Eigen::VectorXi> shifts;
+
+    auto dfs = [&points, &shifts](const Eigen::MatrixXd V, const Eigen::MatrixXd& A, const Eigen::VectorXd& b, int d,
+        const Eigen::MatrixXd& canonical_points, vector<int>& coeff, auto&& dfs) -> void {
+        if (size(coeff) == d) {
+            bool allZero = 1;
+            Eigen::VectorXi s = Eigen::VectorXi::Zero(d);
+            Eigen::VectorXd v = Eigen::VectorXd::Zero(d);
+            for (int i = 0; i < d; ++i) {
+                if (coeff[i]) {
+                    allZero = 0;
+                    s(i) = coeff[i];
+                    v += V.col(i) * coeff[i];
+                }
+            }
+            if (allZero) return;
+            Eigen::VectorXd p;
+            for (int i = 0; i < canonical_points.cols(); ++i) {
+                p = canonical_points.col(i) + v;
+                Eigen::VectorXd c = A * p - b * 3;
+                bool inside = 1;
+                for (int j = 0; j < c.size(); ++j) {
+                    if (c(j) > 1e-9) {
+                        inside = 0;
+                        break;
+                    }
+                }
+                if (inside) {
+                    points.push_back(p);
+                    shifts.push_back(s);
+                }
+            }
+            return;
+        }
+        for (int x = -3; x <= 3; ++x) {
+            coeff.push_back(x);
+            dfs(V, A, b, d, canonical_points, coeff, dfs);
+            coeff.pop_back();
+        }
+    };
+
+    int d = V.rows();
+
+    for (int i = 0; i < canonical_points.cols(); ++i) {
+        points.push_back(canonical_points.col(i));
+        shifts.push_back(Eigen::VectorXi::Zero(d));
+    }
+
+    vector<int> coeff;
+    dfs(V, A, b, d, canonical_points, coeff, dfs);
+
+    Eigen::MatrixXd P(d, size(points));
+    Eigen::MatrixXi S(d, size(shifts));
+    for (int i = 0; i < size(points); ++i) {
+        P.col(i) = points[i];
+        S.col(i) = shifts[i];
+    }
+
+    return {P, S};
 }
 
 void testLatticeDiameter() {
@@ -291,6 +475,12 @@ PYBIND11_MODULE(periodica, m) {
          py::arg("points"));
    m.def("lattice_diameter", &LatticeDiameter, "Compute diameter of a unit cell in the lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
          py::arg("U"));
+   m.def("reduced_basis", &reducedBasis, "Reduce Lattice basis into reduced basis",
+         py::arg("U"));
    m.def("dirichlet_domain", &DirichletDomain, "Compute Dirichlet domain of a lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
          py::arg("U"));
+   m.def("canonical_points", &canonicalPoints, "Compute the canonical copy of points in the Dirichlet domain",
+         py::arg("A"), py::arg("b"), py::arg("points"));
+   m.def("domain_x3_points", &domainX3Points, "Compute the periodic points in the 3X Dirichlet domain",
+         py::arg("V"), py::arg("A"), py::arg("b"), py::arg("canonical_points"));
 }
