@@ -200,6 +200,47 @@ double LatticeDiameter(const Eigen::MatrixXd& U) {
     return max_dist;
 }
 
+
+void generateBasis(const Eigen::MatrixXd& U, vector<Eigen::VectorXd>& V, int d, vector<int>& coeff) {
+    if (size(coeff) == d) {
+        Eigen::VectorXd v = Eigen::VectorXd::Zero(d);
+        bool allZero = 1;
+        for (int i = 0; i < d; ++i) {
+            if (coeff[i] != 0) {
+                allZero = 0;
+                v += coeff[i] * U.col(i);
+            }
+        }
+        if (!allZero) V.push_back(v);
+        return;
+    }
+    for (int c = -1; c <= 1; ++c) {
+        coeff.push_back(c);
+        generateBasis(U, V, d, coeff);
+        coeff.pop_back();
+    }
+}
+
+pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(const Eigen::MatrixXd& U) {
+    if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
+        throw std::invalid_argument("Input must be a 2x2 or 3x3 matrix");
+    }
+
+    int d = U.rows();
+    vector<Eigen::VectorXd> V;
+    vector<int> coeff;
+    generateBasis(U, V, d, coeff);
+
+    Eigen::MatrixXd A(size(V), d);
+    Eigen::VectorXd b(size(V));
+    for (int i = 0; i < size(V); ++i) {
+        A.row(i) = V[i];
+        b(i) = V[i].norm() * V[i].norm() / 2;
+    }
+
+    return {A, b};
+}
+
 void testLatticeDiameter() {
     Eigen::MatrixXd U(2, 2);
 
@@ -209,9 +250,31 @@ void testLatticeDiameter() {
     cout << LatticeDiameter(U) << "\n";
 }
 
+void testDirichletDomain2D() {
+    Eigen::MatrixXd U(2, 2);
+
+    U(0, 0) = 1, U(0, 1) = 0;
+    U(1, 0) = 0, U(1, 1) = 1;
+
+    auto D = DirichletDomain(U);
+
+    cout << D.first << "\n";
+    cout << D.second << "\n";
+}
+
+void testDirichletDomain3D() {
+    Eigen::MatrixXd U = Eigen::MatrixXd::Identity(3, 3);
+
+    auto D = DirichletDomain(U);
+
+    cout << D.first << "\n";
+    cout << D.second << "\n";
+}
+
 int main() 
-{
-    testLatticeDiameter();
+{ 
+    testDirichletDomain3D();
+    // testLatticeDiameter();
 }
 
 #include <pybind11/pybind11.h>
@@ -227,5 +290,7 @@ PYBIND11_MODULE(periodica, m) {
    m.def("euclidean_mst", &EuclideanMST, "Compute 2D & 3D Euclidean minimum spanning trees",
          py::arg("points"));
    m.def("lattice_diameter", &LatticeDiameter, "Compute diameter of a unit cell in the lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
+         py::arg("U"));
+   m.def("dirichlet_domain", &DirichletDomain, "Compute Dirichlet domain of a lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
          py::arg("U"));
 }
