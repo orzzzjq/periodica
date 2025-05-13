@@ -230,6 +230,7 @@ Eigen::MatrixXd reducedBasis(const Eigen::MatrixXd& U) {
         while (!reduced) {
             V.col(h) += V.col(i);
             V.col(i) *= -1;
+            V.col(2) = -V.col(0) -V.col(1);
             reduced = 1;
             for (auto c : id) {
                 i = c[0], j = c[1], h = c[2];
@@ -383,10 +384,10 @@ pair<Eigen::MatrixXd, Eigen::MatrixXi> domainX3Points(const Eigen::MatrixXd V, c
             Eigen::VectorXd p;
             for (int i = 0; i < canonical_points.cols(); ++i) {
                 p = canonical_points.col(i) + v;
-                Eigen::VectorXd c = A * p - b * 3;
+                Eigen::VectorXd c = A * p;
                 bool inside = 1;
                 for (int j = 0; j < c.size(); ++j) {
-                    if (c(j) > 1e-9) {
+                    if (c(j) / (b(j) * 3) > 1 + 1e-9) {
                         inside = 0;
                         break;
                     }
