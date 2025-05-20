@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(1, './build/Release')
+
 import periodica
 import numpy as np
 from matplotlib import pyplot as plt
@@ -5,6 +8,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import ConvexHull
 import time
 from itertools import combinations
+import matplotlib.animation as animation
 
 red = '#EE0E0E'
 blue = '#0E0EEE'
@@ -79,77 +83,7 @@ def test_delaunay_mst(n, d):
 
     plt.show()
 
-def test_lattice_diameter(d):
-    U = np.identity(d)
-    # U = np.random.rand(d, d)
-    diameter = periodica.lattice_diameter(U)
-
-    fig = plt.figure()
-
-    if d == 2:
-        ax = fig.add_subplot()
-
-        vertices = []
-        for mask in range(1<<d):
-            v = np.zeros(d)
-            for i in range(d):
-                if mask & (1 << i):
-                    v += U[:,i]
-            vertices.append(v)
-
-        vertices = np.array(vertices)
-
-        edges = []
-        for i in range(1<<d):
-            for j in range(i+1, 1<<d):
-                if (i^j).bit_count() == 1:
-                    edges.append((i, j))
-
-        for e in edges:
-            ax.plot(*vertices[e,:].T, color=green, lw=1)
-
-        center = U @ np.ones(2) / 2
-        circle = plt.Circle(center, diameter/2, color=blue, lw=1, fill=False)
-        ax.add_patch(circle)
-
-        ax.set_aspect(1)
-
-    else:
-        ax = fig.add_subplot(projection='3d')
-
-        vertices = []
-        for mask in range(1<<d):
-            v = np.zeros(d)
-            for i in range(d):
-                if mask & (1 << i):
-                    v += U[:,i]
-            vertices.append(v)
-
-        vertices = np.array(vertices)
-
-        edges = []
-        for i in range(1<<d):
-            for j in range(i+1, 1<<d):
-                if (i^j).bit_count() == 1:
-                    edges.append((i, j))
-
-        for e in edges:
-            ax.plot(*vertices[e,:].T, color=green, lw=1)
-
-        center = U @ np.ones(3) / 2
-        u, v = np.mgrid[0:2*np.pi:50j, 0:np.pi:50j]
-        x = np.cos(u) * np.sin(v) * diameter * 3 / 2 + center[0]
-        y = np.sin(u) * np.sin(v) * diameter * 3 / 2 + center[1]
-        z = np.cos(v) * diameter * 3 / 2 + center[2]
-        
-        ax.plot_surface(x, y, z, color=blue, alpha=0.2)
-
-        limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
-        ax.set_box_aspect(np.ptp(limits, axis = 1))
-
-    plt.show()
-
-def test_dirichlet_domain(d):
+def test_periodic_delaunay(d):
     def get_domain_vertices(A, b):
         res = []
         if d == 2:
@@ -193,20 +127,18 @@ def test_dirichlet_domain(d):
         for e in edges:
             ax.plot(*cell_vertices[e,:].T, color=color, lw=1)
     
-    def draw_polytope(A, b, ax, color='k', lw=1):
+    def draw_polytope(A, b, ax, color='k', lw=1, ls='-', alpha=1):
         domain_vertices = get_domain_vertices(A, b)
         hull = ConvexHull(domain_vertices)
 
         if A.shape[1] == 2:
             for simplex in hull.simplices:
-                ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], color=color)
+                ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], color=color, lw=lw, ls=ls, alpha=alpha)
         else:
             for simplex in hull.simplices:
-                ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], domain_vertices[simplex, 2], color=color, lw=lw, alpha=0.2)
-                ax.plot(domain_vertices[[simplex[-1], simplex[0]], 0], domain_vertices[[simplex[-1], simplex[0]], 1], domain_vertices[[simplex[-1], simplex[0]], 2], color=color, lw=lw, alpha=0.2)
-
-    def get_line_points(a, b, c, ref = [-1., 1.]):
-        return np.array([[x, (c - a * x) / b] for x in ref])
+                ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], domain_vertices[simplex, 2], color=color, lw=lw, ls=ls, alpha=alpha)
+                ax.plot(domain_vertices[[simplex[-1], simplex[0]], 0], domain_vertices[[simplex[-1], simplex[0]], 1], domain_vertices[[simplex[-1], simplex[0]], 2], color=color, lw=lw, ls=ls, alpha=alpha)
+                ax.plot_trisurf(*domain_vertices[simplex].T, linewidth=0, color=color, antialiased=True, alpha=0.1)
     
     def get_canonical_points(U, d, points, A, b):
         coeff = []
@@ -231,156 +163,60 @@ def test_dirichlet_domain(d):
         if len(idx) != points.shape[1]:
             print(f'Missing point: {len(idx)}/{len(points)}')
         return np.array(res)
-
-    def reduce2d(b):
-        # 2D equivalent of Selling's algorithm
-        coeffs = np.zeros((3,3))
-        reduced = True
-        for i,j,h in [[0,1,2], [0,2,1], [1,2,0]]:
-            coeffs[i,j] = np.dot(b[i], b[j])
-            if coeffs[i,j] > 0:
-                reduced = False
-                break
-
-        while not reduced:
-            b[h] += b[i]
-            b[i] = -b[i]
-            b[2] = - b[1] - b[0]
-
-            reduced = True
-            # lattice is reduced if all coefficients are negative
-            for i,j,h in [[0,1,2], [0,2,1], [1,2,0]]:
-                coeffs[i,j] = np.dot(b[i], b[j])
-                if coeffs[i,j] > 0:
-                    reduced = False
-                    break
-
-        return b
-
-    def reduce2dnew(b):
-        # 2D equivalent of Selling's algorithm
-        coeffs = np.zeros((3,3))
-        reduced = True
-        for i,j,h in [[0,1,2], [0,2,1], [1,2,0]]:
-            coeffs[i,j] = np.dot(b[i], b[j])
-            if coeffs[i,j] > 0:
-                reduced = False
-                break
-
-        while not reduced:
-            for i, j in [[0,0],[1,1],[0,1]]:
-                coeffs[i,j] = np.dot(b[i], b[j])
-            
-            if 2 * abs(coeffs[0,1]) <= coeffs[0,0] and coeffs[0,0] <= coeffs[1,1]:
-                # Lagrange-reduced
-                b[1] = -b[1]
-                b[2] = -b[0]-b[1]
-                print(f'b2: {b[2]}')
-                # break
-            else:
-                s = 1 if coeffs[0,1] > 0 else -1
-                b[1] = b[1] - s * b[0]
-                b[2] = -b[0]-b[1]
-                print(f'b2: {b[2]}')
-
-            # b[h] += b[i]
-            # b[i] = -b[i]
-
-            reduced = True
-            # lattice is reduced if all coefficients are negative
-            for i,j,h in [[0,1,2], [0,2,1], [1,2,0]]:
-                coeffs[i,j] = np.dot(b[i], b[j])
-                if coeffs[i,j] > 0:
-                    reduced = False
-                    break
-        
-        # print('coeffs:')
-        # print(coeffs)
-
-        return b
-
-    def check_reduced(b):
-        # Check that any pair of basis vectors enclose an obtuse angle.
-        # Otherwise the basis is not reduced.
-        for v1,v2 in combinations(b, 2):
-            scal_prod = np.dot(v1,v2)
-            magn_prod = np.linalg.norm(v1)*np.linalg.norm(v2)
-            angle = np.arccos(scal_prod/magn_prod)
-            # print(angle/np.pi*180, scal_prod)
-            if angle < np.pi/2:
-                print("Warning: Lattice basis not reduced!")
     
+    global visual
+
     n = 10
 
     # U = np.identity(d)
     U = np.random.rand(d, d) * 2 - 1
-    # U = np.array([[0.1, 1], [0, 1]])
-    # U = np.array([[-0.1359805, 0.16300457], [-0.84394018, 0.88592977]])
 
-    print(f'Orignial basis:\n{U}')
+    # print(f'Orignial basis:\n{U}')
 
     points = U @ np.random.rand(d, n)
 
     fig = plt.figure()
 
     if d == 2:
-        ax = fig.add_subplot()
-
-        # ax.scatter(*points, color='k', s=5)
-
-        draw_cell_boundary(U, ax, blue)
+        t1 = time.perf_counter()
 
         rU = periodica.reduced_basis(U)
 
-        # bb = [U[:,i] for i in range(U.shape[1])]
-        # bb.append(-sum(bb))
-
-        # print(f'Extended basis:\n{np.array(bb).T}')
-        
-        # rbb = np.array(reduce2d(bb)).T
-
-        # print(f'Reduced basis:\n{np.array(reduce2d(bb)).T}')
-        # print(f'Reduced basis:\n{rbb}')
-
-        check_reduced([rU[:,i] for i in range(rU.shape[1])])
-
-        # rU = rbb
-
-        # print(rU)
-
-        draw_cell_boundary(rU[:,:-1], ax, green)
-
-        # for multiplicity in [1]:
-        A, b =  periodica.dirichlet_domain(rU[:,:-1])
-        draw_polytope(A, b, ax, lw=0.1)
+        A, b =  periodica.dirichlet_domain(rU)
         
         canonical_points = periodica.canonical_points(A, b, points)
 
-        draw_polytope(A, b * 3, ax, lw=0.5)
+        working_points, I, S = periodica.points_in_3x_domain(rU, A, b, canonical_points)
 
-        working_points = periodica.domain_x3_points(rU[:,:-1], A, b, canonical_points)
+        delaunay_edges = periodica.delaunay_skeleton(working_points)
 
-        # print(working_points[0])
-        # print(working_points[1])
-
-        ax.scatter(*working_points[0][:,canonical_points.shape[1]:], color=blue, s=5)
-
-        ax.scatter(*canonical_points, color=red, s=5)
-
-        delaunay_edges = periodica.delaunay_skeleton(working_points[0])
+        print(f'Running time: {time.perf_counter() - t1} s')
         
-        # mst_edges = periodica.euclidean_mst(working_points[0])
-      
-        for s, t in delaunay_edges:
-            color = red if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 'k'
-            alpha = 0.5 if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 0.2
-            ax.plot(*working_points[0][:,(s,t)], lw=1, color=color, alpha=alpha)
+        if visual:
+            ax = fig.add_subplot()
 
-        # for s, t in mst_edges:
-        #     if s < canonical_points.shape[1] or t < canonical_points.shape[1]:
-        #         ax.plot(*working_points[0][:,(s,t)], lw=1.5, color=red, alpha=1)
+            # draw_cell_boundary(U, ax, blue)
+            draw_cell_boundary(rU[:,:-1], ax, green)
+            draw_polytope(A, b, ax, lw=1, alpha=1, ls='--')
+            draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=1)
 
-        ax.set_aspect(1)
+            ax.scatter(*working_points[:,canonical_points.shape[1]:], color=blue, s=5)
+
+            ax.scatter(*canonical_points, color=red, s=5)
+            
+            E = []
+            for s, t in delaunay_edges:
+                color = red if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 'k'
+                alpha = 0.5 if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 0.2
+                ax.plot(*working_points[:,(s,t)], lw=1, color=color, alpha=alpha)
+                if s < canonical_points.shape[1] or t < canonical_points.shape[1]:
+                    if s > t:
+                        z = s 
+                        s = t
+                        t = z
+                    E.append((I[s], I[t]))
+
+            ax.set_aspect(1)
     
     else:
 
@@ -389,37 +225,74 @@ def test_dirichlet_domain(d):
 
         rU = periodica.reduced_basis(U)
 
-        A, b =  periodica.dirichlet_domain(rU[:,:-1])
+        A, b =  periodica.dirichlet_domain(rU)
         
         canonical_points = periodica.canonical_points(A, b, points)
 
-        working_points = periodica.domain_x3_points(rU[:,:-1], A, b, canonical_points)
+        working_points, I, S = periodica.points_in_3x_domain(rU, A, b, canonical_points)
 
-        delaunay_edges = periodica.delaunay_skeleton(working_points[0])
+        delaunay_edges = periodica.delaunay_skeleton(working_points)
 
-        mst_edges = periodica.euclidean_mst(working_points[0])
+        mst_edges = periodica.euclidean_mst(working_points)
 
         print(f'Running time: {time.perf_counter() - t1} s')
 
-        ax = fig.add_subplot(projection='3d')
+        if visual:
+            ax = fig.add_subplot(projection='3d')
 
-        # draw_cell_boundary(rU[:,:-1], ax, green)
-        draw_polytope(A, b * 3, ax)
+            # draw_cell_boundary(rU[:,:-1], ax, green)
+            draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=0.5)
 
-        ax.scatter(*working_points[0][:,canonical_points.shape[1]:], color=blue, s=5)
+            ax.scatter(*working_points[:,canonical_points.shape[1]:], color=blue, s=5)
 
-        ax.scatter(*canonical_points, color=red, s=5)
+            ax.scatter(*canonical_points, color=red, s=5)
 
-        for s, t in delaunay_edges:
-            if s >= canonical_points.shape[1] and t >= canonical_points.shape[1]:
-                continue
-            color = red if s < canonical_points.shape[1] or t < canonical_points.shape[1] else blue
-            alpha = 0.5 if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 0.2
-            ax.plot(*working_points[0][:,(s,t)], lw=1, color=color, alpha=alpha)
+            E = []
+            for s, t in delaunay_edges:
+                if s >= canonical_points.shape[1] and t >= canonical_points.shape[1]:
+                    continue
+                color = red if s < canonical_points.shape[1] or t < canonical_points.shape[1] else blue
+                alpha = 0.5 if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 0.2
+                ax.plot(*working_points[:,(s,t)], lw=1, color=color, alpha=alpha)
+                if s < canonical_points.shape[1] or t < canonical_points.shape[1]:
+                    if s > t:
+                        z = s 
+                        s = t
+                        t = z
+                    E.append((I[s], I[t]))
+            
+            limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
+            ax.set_box_aspect(np.ptp(limits, axis = 1))
         
-        limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
-        ax.set_box_aspect(np.ptp(limits, axis = 1))
+        if animation:
+            gif = animation.FuncAnimation(fig, lambda x: ax.view_init(azim=x), frames=np.arange(0, 362, 2), interval=100)
+            gif.save('rotation.gif', dpi=80, writer='imagemagick')
 
-    plt.show()
+    if visual:
+        plt.show()
 
-test_dirichlet_domain(3)
+def test_merge_tree(d):    
+    n = 2
+    U = np.random.rand(d, d) * 2 - 1
+    points = U @ np.random.rand(d, n)
+    
+    V = periodica.reduced_basis(U)
+
+    edges, filtration, shift = periodica.periodic_delaunay(U, points)
+
+    pmt = periodica.merge_tree(n, d, V, edges, filtration, shift)
+
+    periodica.print_merge_tree(pmt)
+
+    barcode = periodica.barcode(d, pmt)
+
+    for lst in barcode:
+        print(lst)
+
+
+visual = True
+animation = False
+
+# test_periodic_delaunay(2)
+test_merge_tree(3)
+

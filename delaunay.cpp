@@ -1,41 +1,18 @@
-#include "debug.h"
-//#include "delaunay.h"
-#include <gudhi/Alpha_complex.h>
-#include <gudhi/Simplex_tree.h>
+#include "auxiliary.h"
+#include "delaunay.h"
 
-#include <CGAL/squared_distance_2.h> //for 2D functions
-#include <CGAL/squared_distance_3.h> //for 3D functions
-
-#include <CGAL/Epeck_d.h>
-#include <CGAL/Random.h>
-
-#include <boost/graph/kruskal_min_spanning_tree.hpp>
-
-#include <Eigen/Dense>
-
-#include <vector>
-
-using K2 = CGAL::Epeck_d< CGAL::Dimension_tag<2> >;
-using Point2 = K2::Point_d;
-
-using K3 = CGAL::Epeck_d< CGAL::Dimension_tag<3> >;
-using Point3 = K3::Point_d;
-
-using VertexId = boost::property<boost::vertex_index_t, int>;
-using EdgeWeight = boost::property<boost::edge_weight_t, double>;
-
-using Graph = boost::adjacency_list<boost::vecS, boost::vecS,
-                                    boost::undirectedS, VertexId, EdgeWeight>;
-
-using VertexDescriptor = boost::graph_traits<Graph>::vertex_descriptor;
-using EdgeDescriptor = boost::graph_traits<Graph>::edge_descriptor;
-
-using VertexIterator = boost::graph_traits<Graph>::vertex_iterator;
-using EdgeIterator = boost::graph_traits<Graph>::edge_iterator;
-
+namespace DELAUNAY {
 using namespace std;
 
-Eigen::MatrixXi DelaunaySkeleton(const Eigen::MatrixXd& points) {
+// Compute the 1-skeleton of the Delaunay triangulation
+// Input:
+//  Points: MatrixXd(d, N)
+// Output:
+//  Delaunay edges: MatrixXi(M, 2)
+//  * Here M is the number of Delaunay edges
+Eigen::MatrixXi DelaunaySkeleton(
+    const Eigen::MatrixXd& points
+) {
     if (points.rows() != 2 && points.rows() != 3) {
         throw std::invalid_argument("Input must be a 2D NumPy array of shape (2, n) or (3, n)");
     }
@@ -92,7 +69,10 @@ Eigen::MatrixXi DelaunaySkeleton(const Eigen::MatrixXd& points) {
     return result;
 }
 
-Eigen::MatrixXi EuclideanMST(const Eigen::MatrixXd& points) {
+// Compute the Euclidean MST of a point set
+Eigen::MatrixXi EuclideanMST(
+    const Eigen::MatrixXd& points
+) {
     if (points.rows() != 2 && points.rows() != 3) {
         throw std::invalid_argument("Input must be a 2D NumPy array of shape (2, n) or (3, n)");
     }
@@ -175,7 +155,10 @@ Eigen::MatrixXi EuclideanMST(const Eigen::MatrixXd& points) {
     return result;
 }
 
-double LatticeDiameter(const Eigen::MatrixXd& U) {
+// Compute diameter of unit cell of the lattice
+double LatticeDiameter(
+    const Eigen::MatrixXd& U
+) {
     if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
         throw std::invalid_argument("Input must be a 2x2 or 3x3 matrix");
     }
@@ -200,7 +183,14 @@ double LatticeDiameter(const Eigen::MatrixXd& U) {
     return max_dist;
 }
 
-Eigen::MatrixXd reducedBasis(const Eigen::MatrixXd& U) {
+// Compute reduced basis
+// Input:
+//  Original basis U: MatrixXd(d, d)
+// Output:
+//  Reduced basis V: MatrixXd(d, d)
+Eigen::MatrixXd reducedBasis(
+    const Eigen::MatrixXd& U
+) {
     if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
         throw std::invalid_argument("Input must be a 2x2 or 3x3 matrix");
     }
@@ -273,34 +263,21 @@ Eigen::MatrixXd reducedBasis(const Eigen::MatrixXd& U) {
     return V;
 }
 
-// void generateBasis(const Eigen::MatrixXd& U, vector<Eigen::VectorXd>& V, int d, vector<int>& coeff) {
-//     if (size(coeff) == d) {
-//         Eigen::VectorXd v = Eigen::VectorXd::Zero(d);
-//         bool allZero = 1;
-//         for (int i = 0; i < d; ++i) {
-//             if (coeff[i] != 0) {
-//                 allZero = 0;
-//                 v += coeff[i] * U.col(i);
-//             }
-//         }
-//         if (!allZero) V.push_back(v);
-//         return;
-//     }
-//     for (int c = -1; c <= 1; ++c) {
-//         coeff.push_back(c);
-//         generateBasis(U, V, d, coeff);
-//         coeff.pop_back();
-//     }
-// }
-
-pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(const Eigen::MatrixXd& U) {
-    if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
-        throw std::invalid_argument("Input must be a 2x2 or 3x3 matrix");
+// Compute Dirichlet domain from reduced basis
+// Input:
+//  Reduced basis V: MatrixXd(d, d + 1)
+// Ouput:
+//  Ax <= b
+//  Coefficient matrix A: MatrixXd(m, d)
+//  Right-hand side b: VectorXd(m)
+pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(
+    const Eigen::MatrixXd& V    // reduced basis
+) {
+    if (V.rows() != V.cols() - 1 || (V.rows() != 2 && V.rows() != 3)) {
+        throw std::invalid_argument("Input must be a reduced basis with dimension (2, 3) or (3, 4)");
     }
 
-    int d = U.rows();
-
-    Eigen::MatrixXd V = reducedBasis(U);
+    int d = V.rows();
 
     vector<Eigen::VectorXd> F; // face normals
     
@@ -327,7 +304,17 @@ pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(const Eigen::MatrixXd& U)
     return {A, b};
 }
 
-Eigen::MatrixXd canonicalPoints(const Eigen::MatrixXd& A, const Eigen::VectorXd& b, const Eigen::MatrixXd& points) {
+// Compute canonical points in the Dirichlet domain
+// Input:
+//  Dirichlet domain parameterized by Ax <= b, where A is MatrixXd(m, d), b is VectorXd(m)
+//  Points in original unit cell: MatrixXd(d, n)
+// Output:
+//  Canonical points: MatrixXd(d, n)
+Eigen::MatrixXd canonicalPoints(
+    const Eigen::MatrixXd& A, 
+    const Eigen::VectorXd& b, 
+    const Eigen::MatrixXd& points
+) {
     if (A.cols() != points.rows() || (A.cols() != 2 && A.cols() != 3)) {
         throw std::invalid_argument("Invalid input dimension");
     }
@@ -359,15 +346,31 @@ Eigen::MatrixXd canonicalPoints(const Eigen::MatrixXd& A, const Eigen::VectorXd&
     return result;
 }
 
-pair<Eigen::MatrixXd, Eigen::MatrixXi> domainX3Points(const Eigen::MatrixXd V, const Eigen::MatrixXd& A, const Eigen::VectorXd& b, const Eigen::MatrixXd& canonical_points) {
+// Compute periodic copies of the canonical points in the 3x Dirichlet domain
+// Input:
+//  Reduced basis V: MatrixXd(d, d + 1)
+//  Dirichlet domain parameterized by Ax <= b, where A is MatrixXd(m, d), b is VectorXd(m)
+//  Canonical points: MatrixXd(d, n)
+// Output:
+//  Points in the 3x domain: MatrixXd(d, N)
+//  Indices of the canonical copy: VectorXi(N)
+//  Shift vectors of the point: MatrixXi(d, N)
+//  * Here N is the number of point in the 3x domain
+std::tuple<Eigen::MatrixXd, Eigen::VectorXi, Eigen::MatrixXi> pointsIn3xDomain(
+    const Eigen::MatrixXd V, 
+    const Eigen::MatrixXd& A,
+    const Eigen::VectorXd& b, 
+    const Eigen::MatrixXd& canonical_points
+) {
     if (A.cols() != canonical_points.rows() || (A.cols() != 2 && A.cols() != 3)) {
         throw std::invalid_argument("Invalid input dimension");
     }
 
     vector<Eigen::VectorXd> points;
+    vector<int> indices;
     vector<Eigen::VectorXi> shifts;
 
-    auto dfs = [&points, &shifts](const Eigen::MatrixXd V, const Eigen::MatrixXd& A, const Eigen::VectorXd& b, int d,
+    auto dfs = [&points, &indices, &shifts](const Eigen::MatrixXd V, const Eigen::MatrixXd& A, const Eigen::VectorXd& b, int d,
         const Eigen::MatrixXd& canonical_points, vector<int>& coeff, auto&& dfs) -> void {
         if (size(coeff) == d) {
             bool allZero = 1;
@@ -394,6 +397,7 @@ pair<Eigen::MatrixXd, Eigen::MatrixXi> domainX3Points(const Eigen::MatrixXd V, c
                 }
                 if (inside) {
                     points.push_back(p);
+                    indices.push_back(i);
                     shifts.push_back(s);
                 }
             }
@@ -410,6 +414,7 @@ pair<Eigen::MatrixXd, Eigen::MatrixXi> domainX3Points(const Eigen::MatrixXd V, c
 
     for (int i = 0; i < canonical_points.cols(); ++i) {
         points.push_back(canonical_points.col(i));
+        indices.push_back(i);
         shifts.push_back(Eigen::VectorXi::Zero(d));
     }
 
@@ -417,71 +422,148 @@ pair<Eigen::MatrixXd, Eigen::MatrixXi> domainX3Points(const Eigen::MatrixXd V, c
     dfs(V, A, b, d, canonical_points, coeff, dfs);
 
     Eigen::MatrixXd P(d, size(points));
+    Eigen::VectorXi I(size(points));
     Eigen::MatrixXi S(d, size(shifts));
     for (int i = 0; i < size(points); ++i) {
         P.col(i) = points[i];
+        I(i) = indices[i];
         S.col(i) = shifts[i];
     }
 
-    return {P, S};
+    return {P, I, S};
 }
 
-void testLatticeDiameter() {
-    Eigen::MatrixXd U(2, 2);
+// Compute quotient complex from periodic Delaunay complex
+// Output:
+//  Delaunay edges: MatrixXi(m, 2)
+//  Filtration values: VectorXd(m)
+//  Shift vectors: MatrixXi(d, m)
+std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
+    const Eigen::MatrixXd& U,       // lattice basis
+    const Eigen::MatrixXd& points   // points in unit cell
+) {
+    if (U.cols() != U.rows() || U.rows() != points.rows()) {
+        throw std::invalid_argument("Invalid input");
+    }
 
-    U(0, 0) = 1, U(0, 1) = 0;
-    U(1, 0) = 0, U(1, 1) = 1;
+    int d = points.rows(), n = points.cols();
+    
+    // Reduced basis
+    auto V = reducedBasis(U);
+    
+    // Dirichlet domain
+    auto [A, b] = DirichletDomain(V);
 
-    cout << LatticeDiameter(U) << "\n";
+    // Canonical points in the Dirichlet domain
+    auto canonical_points = canonicalPoints(A, b, points);
+
+    // Points in the 3x Dirichlet domain, together with original index and shift vectors
+    auto [working_points, I, S] = pointsIn3xDomain(V, A, b, canonical_points);
+
+    // Delaunay complex from point in the 3x domain
+    auto delaunay_edges = DelaunaySkeleton(working_points);
+
+    // Filter the periodic edges (have at least one end point in the 1x domain
+    vector<pair<int,int>> quotient_edges;
+    for (int i = 0; i < delaunay_edges.rows(); ++i) {
+        int s = delaunay_edges(i, 0), t = delaunay_edges(i, 1);
+        if (s < n || t < n) {
+            if (s > t) swap(s, t); // let the first point be the one with smaller index
+            quotient_edges.push_back({s, t});
+        }
+    }
+
+    // Get the results
+    int M = size(quotient_edges);
+    Eigen::MatrixXi edges(M, 2);
+    Eigen::VectorXd filtration(M);
+    Eigen::MatrixXi shift(d, M);
+
+    for (int i = 0; i < M; ++i) {
+        // edge with original index
+        auto [s, t] = quotient_edges[i];
+        edges(i, 0) = I(s);
+        edges(i, 1) = I(t);
+        
+        // filtration value
+        double sq_dist = 0;
+        if (d == 2) {
+            double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t);
+            sq_dist = dx * dx + dy * dy;
+        }
+        else {
+            double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t), dz = working_points(2, s) - working_points(2, t);
+            sq_dist = dx * dx + dy * dy + dz * dz;
+        }
+        filtration(i) = sqrt(sq_dist);
+
+        // shift vector
+        shift.col(i) = S.col(t);
+    }
+
+    return {edges, filtration, shift};
 }
 
-void testDirichletDomain2D() {
-    Eigen::MatrixXd U(2, 2);
+} // End of namespace DELAUNAY
 
-    U(0, 0) = 1, U(0, 1) = 0;
-    U(1, 0) = 0, U(1, 1) = 1;
+// void testLatticeDiameter() {
+//     Eigen::MatrixXd U(2, 2);
 
-    auto D = DirichletDomain(U);
+//     U(0, 0) = 1, U(0, 1) = 0;
+//     U(1, 0) = 0, U(1, 1) = 1;
 
-    cout << D.first << "\n";
-    cout << D.second << "\n";
-}
+//     cout << LatticeDiameter(U) << "\n";
+// }
 
-void testDirichletDomain3D() {
-    Eigen::MatrixXd U = Eigen::MatrixXd::Identity(3, 3);
+// void testDirichletDomain2D() {
+//     Eigen::MatrixXd U(2, 2);
 
-    auto D = DirichletDomain(U);
+//     U(0, 0) = 1, U(0, 1) = 0;
+//     U(1, 0) = 0, U(1, 1) = 1;
 
-    cout << D.first << "\n";
-    cout << D.second << "\n";
-}
+//     auto D = DirichletDomain(U);
 
-int main() 
-{ 
-    testDirichletDomain3D();
-    // testLatticeDiameter();
-}
+//     cout << D.first << "\n";
+//     cout << D.second << "\n";
+// }
 
-#include <pybind11/pybind11.h>
-#include <pybind11/eigen.h>
-#include <pybind11/numpy.h>
-#include <pybind11/stl.h>
+// void testDirichletDomain3D() {
+//     Eigen::MatrixXd U = Eigen::MatrixXd::Identity(3, 3);
 
-namespace py = pybind11;
+//     auto D = DirichletDomain(U);
 
-PYBIND11_MODULE(periodica, m) {
-   m.def("delaunay_skeleton", &DelaunaySkeleton, "Compute 1-skeleton of 2D & 3D Delaunay triangulations",
-         py::arg("points"));
-   m.def("euclidean_mst", &EuclideanMST, "Compute 2D & 3D Euclidean minimum spanning trees",
-         py::arg("points"));
-   m.def("lattice_diameter", &LatticeDiameter, "Compute diameter of a unit cell in the lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
-         py::arg("U"));
-   m.def("reduced_basis", &reducedBasis, "Reduce Lattice basis into reduced basis",
-         py::arg("U"));
-   m.def("dirichlet_domain", &DirichletDomain, "Compute Dirichlet domain of a lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
-         py::arg("U"));
-   m.def("canonical_points", &canonicalPoints, "Compute the canonical copy of points in the Dirichlet domain",
-         py::arg("A"), py::arg("b"), py::arg("points"));
-   m.def("domain_x3_points", &domainX3Points, "Compute the periodic points in the 3X Dirichlet domain",
-         py::arg("V"), py::arg("A"), py::arg("b"), py::arg("canonical_points"));
-}
+//     cout << D.first << "\n";
+//     cout << D.second << "\n";
+// }
+
+// int main() 
+// { 
+//     testDirichletDomain3D();
+//     // testLatticeDiameter();
+// }
+
+// #include <pybind11/pybind11.h>
+// #include <pybind11/eigen.h>
+// #include <pybind11/numpy.h>
+// #include <pybind11/stl.h>
+
+// namespace py = pybind11;
+
+// PYBIND11_MODULE(periodica, m) {
+//    m.def("delaunay_skeleton", &DelaunaySkeleton, "Compute 1-skeleton of 2D & 3D Delaunay triangulations",
+//          py::arg("points"));
+//    m.def("euclidean_mst", &EuclideanMST, "Compute 2D & 3D Euclidean minimum spanning trees",
+//          py::arg("points"));
+//    m.def("lattice_diameter", &LatticeDiameter, "Compute diameter of a unit cell in the lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
+//          py::arg("U"));
+//    m.def("reduced_basis", &reducedBasis, "Reduce Lattice basis into reduced basis",
+//          py::arg("U"));
+//    m.def("dirichlet_domain", &DirichletDomain, "Compute Dirichlet domain of a lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
+//          py::arg("U"));
+//    m.def("canonical_points", &canonicalPoints, "Compute the canonical copy of points in the Dirichlet domain",
+//          py::arg("A"), py::arg("b"), py::arg("points"));
+//    m.def("points_in_3x_domain", &pointsIn3xDomain, "Compute the periodic points in the 3X Dirichlet domain",
+//          py::arg("V"), py::arg("A"), py::arg("b"), py::arg("canonical_points"));
+//    m.def("periodic_delaunay", &periodicDelaunay, "Compute quotient complex from periodic Delaunay complex",
+//          py::arg("U"), py::arg("points"));
+// }
