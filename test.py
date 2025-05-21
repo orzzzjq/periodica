@@ -271,28 +271,65 @@ def test_periodic_delaunay(d):
     if visual:
         plt.show()
 
+def plot_barcode(barcode):
+    inf = 1e+308
+    sep = 1
+    labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot {4\pi\over 3}R^3$']
+
+    d = len(barcode)
+    fig, ax = plt.subplots(d, 1)
+    xmin = min(map(lambda b: min(map(lambda x: x[0], b)), barcode))
+    xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), barcode))
+    xspan = xmax - xmin
+    xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
+    # print(f'xmin {xmin} xmax {xmax}')
+
+    for i in range(d):
+        axi = ax[d - i - 1]
+        n = len(barcode[i])
+        axi.set_xlim([xmin, xmax])
+        ymin, ymax = -sep * (n - 1), 0
+        ymin, ymax = ymin - sep, ymax + sep
+        axi.set_ylim([ymin, ymax])
+        axi.text(xmax - (xmax - xmin) * 0.01, ymax - (ymax - ymin) * 0.05, labels[i], horizontalalignment='right', verticalalignment='top')
+        # print(f'dim-{i}: {n} bars | ymin {ymin} ymax {ymax}')
+        for j in range(n):
+            # print(f'{j}: {barcode[i][j]}')
+            birth, death, multiplicity = barcode[i][j]
+            y = j * -sep
+            axi.plot([birth, death if death < inf else xmax], np.ones(2) * y, lw=2, color='k')
+            axi.text(birth - xspan * 0.01, y, f'{multiplicity:.3f}', fontsize=8, horizontalalignment='right', verticalalignment='center')
+
+    plt.show()
+
 def test_merge_tree(d):    
     n = 2
     U = np.random.rand(d, d) * 2 - 1
     points = U @ np.random.rand(d, n)
     
+    t1 = time.perf_counter()
+
     V = periodica.reduced_basis(U)
 
     edges, filtration, shift = periodica.periodic_delaunay(U, points)
 
     pmt = periodica.merge_tree(n, d, V, edges, filtration, shift)
 
-    periodica.print_merge_tree(pmt)
-
     barcode = periodica.barcode(d, pmt)
 
-    for lst in barcode:
-        print(lst)
+    print(f'Running time: {time.perf_counter() - t1} s')
 
+    # for i in range(len(edges)):
+    #     print(f'{edges[i]}: {filtration[i]:.3f} {shift[:,i]}')
+
+    # periodica.print_merge_tree(pmt)
+    
+    plot_barcode(barcode)
 
 visual = True
 animation = False
 
-# test_periodic_delaunay(2)
-test_merge_tree(3)
+# np.random.seed(0)
 
+# test_periodic_delaunay(2)
+test_merge_tree(2)

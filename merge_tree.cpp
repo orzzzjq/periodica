@@ -285,6 +285,12 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 	// sort the arcs in non-decreasing order
 	std::sort(begin(arcs), end(arcs), filtrationComparator());
 
+	myDebug("Sorted filtration:\n");
+	for (auto a : arcs) {
+		myDebug("%.3f ", a.filtration());
+	}
+	myDebug("\n");
+
 	// union-find algorithm for PMT
 	int x, y, r, s, z, last, p, rOldId, sOldId;
 	double time = 0, vol_p;
@@ -326,8 +332,9 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 			}
 			if (vertices[r].old() > vertices[s].old()) {
 				vertices[r].old() = vertices[s].old();
-				vertices[r].oldId() = vertices[s].oldId();
+				// vertices[r].oldId() = vertices[s].oldId();
 			}
+			vertices[r].oldId() = rOldId;
 			vertices[r].lattice() += vertices[s].lattice();
 			Eigen::Matrix<integer, Dynamic, 1> v(vertices[x].drift() + a.shift() - vertices[y].drift());
 			z = s;
