@@ -7,91 +7,102 @@ from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.spatial import ConvexHull
 import time
-from itertools import combinations
 import matplotlib.animation as animation
 
 red = '#EE0E0E'
 blue = '#0E0EEE'
 green = '#0EEE0E'
 
-# # ------------ for debug
-# from scipy.spatial import Delaunay
+class Periodic:
+    def generate_random_input(self, n, d):
+        self.n = n      # number of points
+        self.d = d      # dimension
+        self.U = np.random.rand(d, d) * 2 - 1       # original basis
+        self.points = self.U @ np.random.rand(d, n) # points in unit cell
 
-# def scipy_delaunay(points_2xn):
-#     tri = Delaunay(points_2xn.T)
-    
-#     edges = set()
-#     for simplex in tri.simplices:
-#         edges.add(tuple(sorted([simplex[0], simplex[1]])))
-#         edges.add(tuple(sorted([simplex[1], simplex[2]])))
-#         edges.add(tuple(sorted([simplex[2], simplex[0]])))
-    
-#     edges_array = np.array(list(edges), dtype=np.int32)
-    
-#     return edges_array
-# # ------------ for debug
+    def periodic_delaunay(self):
+        if not hasattr(self, 'points'):
+            raise Exception('No input points')
+        self.V = periodica.reduced_basis(self.U)    # reduced basis
+        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = periodica.periodic_delaunay(self.U, self.points)
 
-def test_delaunay_mst(n, d):
-    def generate_random_points(n, d):
-        points = np.random.rand(d, n)
-        return points
+    def quotient_complex(self, complex_type='delaunay'):
+        if complex_type == 'delaunay':
+            self.periodic_delaunay()
+        elif complex_type == 'voronoi':
+            pass
+        else:
+            raise Exception(f'Does not support complex type {complex_type}')
 
-    points = generate_random_points(n, d)
-    delaunay_edges = periodica.delaunay_skeleton(points)
-    emst_edges = periodica.euclidean_mst(points)
+    def load_point_set(self, file):
+        pass
 
-    fig = plt.figure()
+    def load_quotient_complex(self, file):
+        pass
 
-    if d == 2:
-        ax = fig.add_subplot()
+    def merge_tree(self):
+        if not hasattr(self, 'quotient_arcs'):
+            self.quotient_complex()
+        self.tree = periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
+        return self.tree
 
-        ax.scatter(*points, color='k', s=10)
+    def print_merge_tree(self):
+        if not hasattr(self, 'tree'):
+            self.merge_tree()
+        periodica.print_merge_tree(self.tree)
 
-        for s, t in delaunay_edges:
-            ax.plot(*points[:,(s,t)], lw=1, color='k', alpha=0.2)
+    def barcodes(self):
+        if not hasattr(self, 'tree'):
+            self.merge_tree()
+        self.bcodes = periodica.barcode(self.d, self.tree)
+        return self.bcodes
 
-        for s, t in emst_edges:
-            ax.plot(*points[:,(s,t)], lw=2, color=red)
+    def plot_barcodes(self, show=True):
+        if not hasattr(self, 'bcodes'):
+            self.barcodes()
+        
+        inf = 1e+308
+        sep = 1
+        labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
-        ax.set_aspect(1)
+        fig, ax = plt.subplots(self.d + 1, 1)
+        fig.set_size_inches(5, (self.d + 1) * 2)
+        plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+        
+        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
+        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
+        xspan = xmax - xmin
+        xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
+        # print(f'xmin {xmin} xmax {xmax}')
 
-    # # ------------ for debug
-    #     ax2 = fig.add_subplot(122)
-    #     ax2.scatter(*points, color='k', s=10)
-    #     for s, t in scipy_delaunay(points):
-    #         ax2.plot(*points[:,(s,t)], lw=1, color='k', alpha=0.3)
-    #     ax2.set_aspect(1)
-    # # ------------ for debug
+        for i in range(self.d + 1):
+            axi = ax[self.d + 1 - i - 1]
+            N = len(self.bcodes[i])
+            axi.set_xlim([xmin, xmax])
+            ymin, ymax = -sep * (N - 1), 0
+            ymin, ymax = ymin - sep, ymax + sep
+            axi.set_ylim([ymin, ymax])
+            axi.set_yticks([])
+            axi.text(xmax - (xmax - xmin) * 0.01, ymax - (ymax - ymin) * 0.05, labels[i], horizontalalignment='right', verticalalignment='top')
+            # print(f'dim-{i}: {N} bars | ymin {ymin} ymax {ymax}')
+            for j in range(N):
+                # print(f'{j}: {self.bcodes[i][j]}')
+                birth, death, multiplicity = self.bcodes[i][j]
+                y = j * -sep
+                axi.plot([birth, death if death < inf else xmax], np.ones(2) * y, lw=2, color='k')
+                axi.text(birth - xspan * 0.01, y, f'{multiplicity:.3f}', fontsize=8, horizontalalignment='right', verticalalignment='center')
 
-    else:
-        ax = fig.add_subplot(projection='3d')
+        if show:
+            plt.show()
 
-        ax.scatter(*points, color='k', s=10)
-
-        # ax.set_xlim([0, 1])
-        # ax.set_ylim([0, 1])
-        # ax.set_zlim([0, 1])
-
-        for s, t in delaunay_edges:
-            plt.plot(*points[:,(s,t)], lw=1, color='k', alpha=0.2)
-
-        for s, t in emst_edges:
-            plt.plot(*points[:,(s,t)], lw=2, color=red)
-
-        limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
-        ax.set_box_aspect(np.ptp(limits, axis = 1))
-
-    plt.show()
-
-def test_periodic_delaunay(d):
-    def get_domain_vertices(A, b):
+    def domain_vertices(self, A, b):
         res = []
-        if d == 2:
+        if self.d == 2:
             for i in range(A.shape[0]):
                 for j in range(i + 1, A.shape[0]):
                     _A = A[(i,j),:]
                     _b = np.array([b[i], b[j]])
-                    if np.linalg.matrix_rank(_A) == d:
+                    if np.linalg.matrix_rank(_A) == self.d:
                         v = np.linalg.solve(_A, _b)
                         c = A @ v / b
                         if c.max() <= 1 + 1e-9:
@@ -102,33 +113,15 @@ def test_periodic_delaunay(d):
                     for k in range(j + 1, A.shape[0]):
                         _A = A[(i,j,k),:]
                         _b = np.array([b[i], b[j], b[k]])
-                        if np.linalg.matrix_rank(_A) == d:
+                        if np.linalg.matrix_rank(_A) == self.d:
                             v = np.linalg.solve(_A, _b)
                             c = A @ v / b
                             if c.max() < 1 + 1e-9:
                                 res.append(v)
-        return np.array(res)
+        return np.array(res)    
 
-    def draw_cell_boundary(U, ax, color=green):
-        cell_vertices = []
-        for mask in range(1<<d):
-            v = np.zeros(d)
-            for i in range(d):
-                if mask & (1 << i):
-                    v += U[:,i]
-            cell_vertices.append(v)
-        cell_vertices = np.array(cell_vertices)
-        edges = []
-        for i in range(1<<d):
-            for j in range(i+1, 1<<d):
-                if (i^j).bit_count() == 1:
-                    edges.append((i, j))
-
-        for e in edges:
-            ax.plot(*cell_vertices[e,:].T, color=color, lw=1)
-    
-    def draw_polytope(A, b, ax, color='k', lw=1, ls='-', alpha=1):
-        domain_vertices = get_domain_vertices(A, b)
+    def draw_polytope(self, A, b, ax, color='k', lw=1, ls='-', alpha=1):
+        domain_vertices = self.domain_vertices(A, b)
         hull = ConvexHull(domain_vertices)
 
         if A.shape[1] == 2:
@@ -139,197 +132,84 @@ def test_periodic_delaunay(d):
                 ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], domain_vertices[simplex, 2], color=color, lw=lw, ls=ls, alpha=alpha)
                 ax.plot(domain_vertices[[simplex[-1], simplex[0]], 0], domain_vertices[[simplex[-1], simplex[0]], 1], domain_vertices[[simplex[-1], simplex[0]], 2], color=color, lw=lw, ls=ls, alpha=alpha)
                 ax.plot_trisurf(*domain_vertices[simplex].T, linewidth=0, color=color, antialiased=True, alpha=0.1)
+
+    def draw_unit_cell(self, basis, ax, color=green):
+        cell_vertices = []
+        for mask in range(1<<self.d):
+            v = np.zeros(self.d)
+            for i in range(self.d):
+                if mask & (1 << i):
+                    v += basis[:,i]
+            cell_vertices.append(v)
+        cell_vertices = np.array(cell_vertices)
+        edges = []
+        for i in range(1<<self.d):
+            for j in range(i+1, 1<<self.d):
+                if (i^j).bit_count() == 1:
+                    edges.append((i, j))
+        for e in edges:
+            ax.plot(*cell_vertices[e,:].T, color=color, lw=1)
     
-    def get_canonical_points(U, d, points, A, b):
-        coeff = []
-        res = []
-        idx = set()
-        def dfs(U, A, b):
-            nonlocal coeff, res
-            if len(coeff) == d:
-                for j in range(points.shape[1]):
-                    v = points[:,j].copy()
-                    for i in range(d):
-                        v += U[:, i] * coeff[i]
-                    if (A @ v - b).max() <= 1e-5:
-                        res.append(v)
-                        idx.add(j)
-                return
-            for c in range(-1, 2):
-                coeff.append(c)
-                dfs(U, A, b)
-                coeff.pop(-1)
-        dfs(U, A, b)
-        if len(idx) != points.shape[1]:
-            print(f'Missing point: {len(idx)}/{len(points)}')
-        return np.array(res)
-    
-    global visual
-
-    n = 10
-
-    # U = np.identity(d)
-    U = np.random.rand(d, d) * 2 - 1
-
-    # print(f'Orignial basis:\n{U}')
-
-    points = U @ np.random.rand(d, n)
-
-    fig = plt.figure()
-
-    if d == 2:
-        t1 = time.perf_counter()
-
-        rU = periodica.reduced_basis(U)
-
-        A, b =  periodica.dirichlet_domain(rU)
+    def plot_delaunay(self, show=True, animation_gif=None):
+        if not hasattr(self, 'points'):
+            raise Exception('No input points')
+        if not hasattr(self, 'V'):
+            self.V = periodica.reduced_basis(self.U)
         
-        canonical_points = periodica.canonical_points(A, b, points)
+        A, b =  periodica.dirichlet_domain(self.V)
+        canonical_points = periodica.canonical_points(A, b, self.points)
+        P, I, S = periodica.points_in_3x_domain(self.V, A, b, canonical_points)
+        delaunay_edges = periodica.delaunay_skeleton(P)
 
-        working_points, I, S = periodica.points_in_3x_domain(rU, A, b, canonical_points)
+        fig = plt.figure()
 
-        delaunay_edges = periodica.delaunay_skeleton(working_points)
-
-        print(f'Running time: {time.perf_counter() - t1} s')
-        
-        if visual:
+        if self.d == 2:
             ax = fig.add_subplot()
 
-            # draw_cell_boundary(U, ax, blue)
-            draw_cell_boundary(rU[:,:-1], ax, green)
-            draw_polytope(A, b, ax, lw=1, alpha=1, ls='--')
-            draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=1)
+            self.draw_unit_cell(self.V[:,:-1], ax, green)
+            self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='--')
+            self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=1)
 
-            ax.scatter(*working_points[:,canonical_points.shape[1]:], color=blue, s=5)
+            ax.scatter(*P[:,self.n:], color=blue, s=5)
 
             ax.scatter(*canonical_points, color=red, s=5)
             
-            E = []
             for s, t in delaunay_edges:
-                color = red if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 'k'
-                alpha = 0.5 if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 0.2
-                ax.plot(*working_points[:,(s,t)], lw=1, color=color, alpha=alpha)
-                if s < canonical_points.shape[1] or t < canonical_points.shape[1]:
-                    if s > t:
-                        z = s 
-                        s = t
-                        t = z
-                    E.append((I[s], I[t]))
+                color = red if s < self.n or t < self.n else 'k'
+                alpha = 0.5 if s < self.n or t < self.n else 0.2
+                ax.plot(*P[:,(s,t)], lw=1, color=color, alpha=alpha)
 
             ax.set_aspect(1)
-    
-    else:
-
-        # draw_cell_boundary(U, ax, blue)
-        t1 = time.perf_counter()
-
-        rU = periodica.reduced_basis(U)
-
-        A, b =  periodica.dirichlet_domain(rU)
         
-        canonical_points = periodica.canonical_points(A, b, points)
-
-        working_points, I, S = periodica.points_in_3x_domain(rU, A, b, canonical_points)
-
-        delaunay_edges = periodica.delaunay_skeleton(working_points)
-
-        mst_edges = periodica.euclidean_mst(working_points)
-
-        print(f'Running time: {time.perf_counter() - t1} s')
-
-        if visual:
+        else:
             ax = fig.add_subplot(projection='3d')
 
-            # draw_cell_boundary(rU[:,:-1], ax, green)
-            draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=0.5)
+            self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=0.5)
 
-            ax.scatter(*working_points[:,canonical_points.shape[1]:], color=blue, s=5)
+            ax.scatter(*P[:,self.n:], color=blue, s=5)
 
             ax.scatter(*canonical_points, color=red, s=5)
 
-            E = []
             for s, t in delaunay_edges:
-                if s >= canonical_points.shape[1] and t >= canonical_points.shape[1]:
+                if s >= self.n and t >= self.n:
                     continue
-                color = red if s < canonical_points.shape[1] or t < canonical_points.shape[1] else blue
-                alpha = 0.5 if s < canonical_points.shape[1] or t < canonical_points.shape[1] else 0.2
-                ax.plot(*working_points[:,(s,t)], lw=1, color=color, alpha=alpha)
-                if s < canonical_points.shape[1] or t < canonical_points.shape[1]:
-                    if s > t:
-                        z = s 
-                        s = t
-                        t = z
-                    E.append((I[s], I[t]))
+                color = red if s < self.n or t < self.n else blue
+                alpha = 0.5 if s < self.n or t < self.n else 0.2
+                ax.plot(*P[:,(s,t)], lw=1, color=color, alpha=alpha)
             
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
             ax.set_box_aspect(np.ptp(limits, axis = 1))
         
-        if animation:
-            gif = animation.FuncAnimation(fig, lambda x: ax.view_init(azim=x), frames=np.arange(0, 362, 2), interval=100)
-            gif.save('rotation.gif', dpi=80, writer='imagemagick')
+            if animation_gif:
+                gif = animation.FuncAnimation(fig, lambda x: ax.view_init(azim=x), frames=np.arange(0, 362, 2), interval=100)
+                gif.save(animation_gif, dpi=80, writer='imagemagick')
+        
+        if show:
+            plt.show()
 
-    if visual:
-        plt.show()
 
-def plot_barcode(barcode):
-    inf = 1e+308
-    sep = 1
-    labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot {4\pi\over 3}R^3$']
-
-    d = len(barcode)
-    fig, ax = plt.subplots(d, 1)
-    xmin = min(map(lambda b: min(map(lambda x: x[0], b)), barcode))
-    xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), barcode))
-    xspan = xmax - xmin
-    xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
-    # print(f'xmin {xmin} xmax {xmax}')
-
-    for i in range(d):
-        axi = ax[d - i - 1]
-        n = len(barcode[i])
-        axi.set_xlim([xmin, xmax])
-        ymin, ymax = -sep * (n - 1), 0
-        ymin, ymax = ymin - sep, ymax + sep
-        axi.set_ylim([ymin, ymax])
-        axi.text(xmax - (xmax - xmin) * 0.01, ymax - (ymax - ymin) * 0.05, labels[i], horizontalalignment='right', verticalalignment='top')
-        # print(f'dim-{i}: {n} bars | ymin {ymin} ymax {ymax}')
-        for j in range(n):
-            # print(f'{j}: {barcode[i][j]}')
-            birth, death, multiplicity = barcode[i][j]
-            y = j * -sep
-            axi.plot([birth, death if death < inf else xmax], np.ones(2) * y, lw=2, color='k')
-            axi.text(birth - xspan * 0.01, y, f'{multiplicity:.3f}', fontsize=8, horizontalalignment='right', verticalalignment='center')
-
-    plt.show()
-
-def test_merge_tree(d):    
-    n = 2
-    U = np.random.rand(d, d) * 2 - 1
-    points = U @ np.random.rand(d, n)
-    
-    t1 = time.perf_counter()
-
-    V = periodica.reduced_basis(U)
-
-    edges, filtration, shift = periodica.periodic_delaunay(U, points)
-
-    pmt = periodica.merge_tree(n, d, V, edges, filtration, shift)
-
-    barcode = periodica.barcode(d, pmt)
-
-    print(f'Running time: {time.perf_counter() - t1} s')
-
-    # for i in range(len(edges)):
-    #     print(f'{edges[i]}: {filtration[i]:.3f} {shift[:,i]}')
-
-    # periodica.print_merge_tree(pmt)
-    
-    plot_barcode(barcode)
-
-visual = True
-animation = False
-
-# np.random.seed(0)
-
-# test_periodic_delaunay(2)
-test_merge_tree(2)
+periodic = Periodic()
+periodic.generate_random_input(n=10, d=2)
+# periodic.print_merge_tree()
+periodic.plot_delaunay(show=False)
+periodic.plot_barcodes()
