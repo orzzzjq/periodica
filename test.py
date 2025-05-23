@@ -1,6 +1,7 @@
 import sys
 sys.path.insert(1, './build/Release')
 
+import re
 import periodica
 import numpy as np
 from matplotlib import pyplot as plt
@@ -38,12 +39,51 @@ class Periodic:
         pass
 
     def load_quotient_complex(self, file):
-        pass
+        with open(file, 'r') as f:
+            # dimension
+            f.readline()
+            self.d = int(f.readline())
+            # lattice
+            f.readline()
+            self.V = []
+            for i in range(self.d):
+                self.V.append(list(map(float, f.readline().split(' '))))
+            self.V = np.array(self.V)
+            # vertices
+            f.readline()
+            self.n = int(f.readline())
+            self.quotient_vertex_filtration = []
+            for i in range(self.n):
+                self.quotient_vertex_filtration.append(float(f.readline().split(' ')[-1]))
+            self.quotient_vertex_filtration = np.array(self.quotient_vertex_filtration)
+            # arcs
+            f.readline()
+            m = int(f.readline())
+            self.quotient_arcs = []
+            self.quotient_arc_filtration = []
+            self.quotient_arc_shift = []
+            for i in range(m):
+                line = f.readline().split(' ')
+                self.quotient_arcs.append(list(map(int, line[:2])))
+                self.quotient_arc_filtration.append(float(line[2]))
+                self.quotient_arc_shift.append(list(map(int, line[3:])))
+            self.quotient_arcs = np.array(self.quotient_arcs)
+            self.quotient_arc_filtration = np.array(self.quotient_arc_filtration)
+            self.quotient_arc_shift = np.array(self.quotient_arc_shift).T
+        
+        # print(f'basis:\n{self.V}')
+        # print(f'vertex filtration:\n{self.quotient_vertex_filtration}')
+        # print(f'arcs:\n{self.quotient_arcs}')
+        # print(f'arc filtration:\n{self.quotient_arc_filtration}')
+        # print(f'arc shift:\n{self.quotient_arc_shift}')
 
     def merge_tree(self):
         if not hasattr(self, 'quotient_arcs'):
             self.quotient_complex()
-        self.tree = periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
+        if hasattr(self, 'quotient_vertex_filtration'):
+            self.tree = periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift, self.quotient_vertex_filtration)
+        else:
+            self.tree = periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
         return self.tree
 
     def print_merge_tree(self):
@@ -171,7 +211,6 @@ class Periodic:
             self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=1)
 
             ax.scatter(*P[:,self.n:], color=blue, s=5)
-
             ax.scatter(*canonical_points, color=red, s=5)
             
             for s, t in delaunay_edges:
@@ -187,7 +226,6 @@ class Periodic:
             self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=0.5)
 
             ax.scatter(*P[:,self.n:], color=blue, s=5)
-
             ax.scatter(*canonical_points, color=red, s=5)
 
             for s, t in delaunay_edges:
@@ -209,7 +247,13 @@ class Periodic:
 
 
 periodic = Periodic()
-periodic.generate_random_input(n=10, d=2)
-# periodic.print_merge_tree()
-periodic.plot_delaunay(show=False)
+
+periodic.load_quotient_complex('examples/example_2d_1.txt')
+# periodic.load_quotient_complex('examples/example_2d_2.txt')
+# periodic.load_quotient_complex('examples/example_3d_1.txt')
+# periodic.generate_random_input(n=10, d=2)
+
+periodic.print_merge_tree()
 periodic.plot_barcodes()
+
+# periodic.plot_delaunay(show=False)
