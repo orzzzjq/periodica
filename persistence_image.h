@@ -1,6 +1,5 @@
 #pragma once
-#include "Persistence_image_impl.h"
-// #include <gudhi/common_persistence_representations.h>
+#include "persistence_image_impl.h"
 
 #include <Eigen/Dense>
 
