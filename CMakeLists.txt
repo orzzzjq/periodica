@@ -87,6 +87,6 @@ endif()
 find_package(pybind11 CONFIG REQUIRED)
 
 # Create the module
-add_library(periodica MODULE auxiliary.cpp delaunay.cpp merge_tree.cpp periodica.cpp)
+add_library(periodica MODULE auxiliary.cpp delaunay.cpp merge_tree.cpp persistence_image.cpp periodica.cpp)
 target_link_libraries(periodica PRIVATE pybind11::module Eigen3::Eigen CGAL::CGAL Gudhi::Gudhi)
 

@@ -469,6 +469,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
         int s = delaunay_edges(i, 0), t = delaunay_edges(i, 1);
         if (s < n || t < n) {
             if (s > t) swap(s, t); // let the first point be the one with smaller index
+            if (t >= n && s > I(t)) continue;
             quotient_edges.push_back({s, t});
         }
     }
@@ -503,67 +504,4 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 
     return {edges, filtration, shift};
 }
-
 } // End of namespace DELAUNAY
-
-// void testLatticeDiameter() {
-//     Eigen::MatrixXd U(2, 2);
-
-//     U(0, 0) = 1, U(0, 1) = 0;
-//     U(1, 0) = 0, U(1, 1) = 1;
-
-//     cout << LatticeDiameter(U) << "\n";
-// }
-
-// void testDirichletDomain2D() {
-//     Eigen::MatrixXd U(2, 2);
-
-//     U(0, 0) = 1, U(0, 1) = 0;
-//     U(1, 0) = 0, U(1, 1) = 1;
-
-//     auto D = DirichletDomain(U);
-
-//     cout << D.first << "\n";
-//     cout << D.second << "\n";
-// }
-
-// void testDirichletDomain3D() {
-//     Eigen::MatrixXd U = Eigen::MatrixXd::Identity(3, 3);
-
-//     auto D = DirichletDomain(U);
-
-//     cout << D.first << "\n";
-//     cout << D.second << "\n";
-// }
-
-// int main() 
-// { 
-//     testDirichletDomain3D();
-//     // testLatticeDiameter();
-// }
-
-// #include <pybind11/pybind11.h>
-// #include <pybind11/eigen.h>
-// #include <pybind11/numpy.h>
-// #include <pybind11/stl.h>
-
-// namespace py = pybind11;
-
-// PYBIND11_MODULE(periodica, m) {
-//    m.def("delaunay_skeleton", &DelaunaySkeleton, "Compute 1-skeleton of 2D & 3D Delaunay triangulations",
-//          py::arg("points"));
-//    m.def("euclidean_mst", &EuclideanMST, "Compute 2D & 3D Euclidean minimum spanning trees",
-//          py::arg("points"));
-//    m.def("lattice_diameter", &LatticeDiameter, "Compute diameter of a unit cell in the lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
-//          py::arg("U"));
-//    m.def("reduced_basis", &reducedBasis, "Reduce Lattice basis into reduced basis",
-//          py::arg("U"));
-//    m.def("dirichlet_domain", &DirichletDomain, "Compute Dirichlet domain of a lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",
-//          py::arg("U"));
-//    m.def("canonical_points", &canonicalPoints, "Compute the canonical copy of points in the Dirichlet domain",
-//          py::arg("A"), py::arg("b"), py::arg("points"));
-//    m.def("points_in_3x_domain", &pointsIn3xDomain, "Compute the periodic points in the 3X Dirichlet domain",
-//          py::arg("V"), py::arg("A"), py::arg("b"), py::arg("canonical_points"));
-//    m.def("periodic_delaunay", &periodicDelaunay, "Compute quotient complex from periodic Delaunay complex",
-//          py::arg("U"), py::arg("points"));
-// }

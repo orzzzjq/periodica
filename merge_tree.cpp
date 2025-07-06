@@ -300,6 +300,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 		r = vertices[x].root(), s = vertices[y].root();
 		rOldId = vertices[r].oldId(), sOldId = vertices[s].oldId();
 		if (r == s) { // catenation
+			if (beams[rOldId].back().ratio() == 1.0 && beams[rOldId].back().exponent() == 0) continue;
 #ifdef debuging
 			printf("\n** catenation %d -> %d\n", x, y);
 #endif
@@ -444,26 +445,32 @@ void constructBarcodes(vector<EventList>& beams, vector<vector<Barcode>>& barcod
 			if (k == epoch.size()) {
 				if (epoch[k - 1].child() != i) { 
 					// never die
-					myDebug("case 1");
+					myDebug("case 1 | ");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, inf, epoch[j].ratio()));
+					myDebug("%dd %s", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
 				}
 				else { 
 					// merger with the same monomial
-					myDebug("case 2");
+					myDebug("case 2 | ");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch.back().time(), epoch[j].ratio()));
+					myDebug("%dd %s", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
 				}
 			}
 			else {
 				if (epoch[j].exponent() != epoch[k].exponent()) { 
 					// different exponents, split into different dimensions
-					myDebug("case 3");
+					myDebug("case 3 | ");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio()));
+					myDebug("%dd %s, ", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
+					if (k == epoch.size() - 1 && epoch[k].child() == i) break;
 					barcodes[epoch[k].exponent()].push_back(Barcode(birth, epoch[k].time(), -epoch[k].ratio()));
+					myDebug("%dd %s", epoch[k].exponent(), barcodes[epoch[k].exponent()].back().toString().c_str());
 				}
 				else { 
 					// same exponent, (epoch[j].ratio() - epoch[k].ratio()) components die
-					myDebug("case 4");
+					myDebug("case 4 | ");
 					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio() - epoch[k].ratio()));
+					myDebug("%dd %s", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
 				}
 			}
 			j = k;
@@ -628,7 +635,7 @@ std::vector<std::vector<std::tuple<double, double, double>>> barcode(
 
 	// Construct barcodes
 	vector<vector<Barcode>> barcodes(d + 1);
-	constructBarcodes(beams, barcodes);	int i, j;
+	constructBarcodes(beams, barcodes);
 
 	// Sort barcodes
 	for (int i = d; i >= 0; --i) {
@@ -647,104 +654,3 @@ std::vector<std::vector<std::tuple<double, double, double>>> barcode(
 }
 
 } // End of namespace PMT
-
-
-// // run example from file
-// void runExample(const char *filename) {
-// 	int d, n, m;
-// 	typedef Matrix<integer, Dynamic, 1> Vector;
-// 	typedef Matrix<double, Dynamic, Dynamic> Matrix;
-// 	typedef Vertex<integer> Vertex;
-// 	typedef Arc<integer> Arc;
-
-// 	FILE* fp;
-// 	fopen_s(&fp, filename, "r");
-// 	if (!fp) {
-// 		throw std::invalid_argument("cannot open file");
-// 		return;
-// 	}
-
-// 	const int buffer = 1000;
-// 	char s[buffer];
-
-// 	// dimension
-// 	fgets(s, buffer, fp);
-// 	fgets(s, buffer, fp);
-// 	sscanf_s(s, "%d", &d);
-// 	printf("dimension: %d\n", d);
-
-// 	// lattice basis
-// 	fgets(s, buffer, fp);
-// 	Matrix U(d, d);
-// 	for (int i = 0; i < d; ++i) {
-// 		for (int j = 0; j < d; ++j) {
-// 			double x;
-// 			fscanf_s(fp, "%lf ", &U(i,j));
-// 		}
-// 	}
-// 	inputVolumeInv = 1.0 / abs(U.determinant());
-// 	cout << "lattice:\n" << U << endl;
-// 	printf("volume: %.3f\n", 1.0 / inputVolumeInv);
-
-// 	// vertices
-// 	fgets(s, buffer, fp);
-// 	printf("vertices:\n");
-// 	vector<Vertex> vertices(1);
-// 	int id;
-// 	double f;
-// 	fscanf_s(fp, "%d", &n);
-// 	for (int i = 0; i < n; ++i) {
-// 		fscanf_s(fp, "%d %lf ", &id, &f);
-// 		vertices.push_back(Vertex(id, f, d));
-// 		printf("%d: %.3f\n", vertices.back().root(), vertices.back().filtration());
-// 	}
-
-// 	// arcs
-// 	fgets(s, buffer, fp);
-// 	printf("arcs:\n");
-// 	vector<Arc> arcs;
-// 	int source, target;
-// 	Vector shift(d, 1);
-// 	fscanf_s(fp, "%d", &m);
-// 	for (int i = 0; i < m; ++i) {
-// 		fscanf_s(fp, "%d %d %lf ", &source, &target, &f);
-// 		for (int j = 0; j < d; ++j) {
-// 			fscanf_s(fp, "%d ", &shift(j, 0));
-// 		}
-// 		arcs.push_back(Arc(source, target, f, shift));
-// 		printf("%d->%d: %.3f (", arcs.back().source(), arcs.back().target(), arcs.back().filtration());
-// 		for (int j = 0; j < d; ++j) {
-// 			printf("%d%c", arcs.back().shift()(j, 0), ",)"[j==d-1]);
-// 		}
-// 		printf("\n");
-// 	}
-
-// 	// run algorithm
-// 	vector<vector<Event>> beams(n + 1);
-// 	process(d, U, vertices, arcs, beams);
-
-// 	// print PMT
-// 	printf("\nperiodic merge tree:\n");
-// 	addRightEnd(beams);
-// 	printBeams(beams);
-
-// 	// construct barcodes
-// 	vector<vector<Barcode>> barcodes(d + 1);
-// 	constructBarcodes(beams, barcodes);
-
-// 	// print barcodes
-// 	printf("\nperiodic barcode:\n");
-// 	printBarcodes(barcodes);
-// }
-
-// int xmain()
-// {
-// 	recordStart();
-// 	//runExample("C:/_/Project/periodica/examples/example_2d_1.txt");
-// 	//runExample("C:/_/Project/periodica/examples/example_2d_2.txt");
-// 	runExample("C:/_/Project/periodica/examples/example_3d_1.txt");
-// 	recordStop("\nrunning time:");
-// 	return 0;
-// }
-
-

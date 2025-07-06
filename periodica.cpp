@@ -5,6 +5,7 @@
 
 #include "delaunay.h"
 #include "merge_tree.h"
+#include "persistence_image.h"
 
 namespace py = pybind11;
 
@@ -38,4 +39,6 @@ PYBIND11_MODULE(periodica, m) {
         py::arg("tree"));
    m.def("barcode", &PMT::barcode, "Compute periodic barcode from merge tree",
         py::arg("d"), py::arg("tree"));
+   m.def("image", &persistenceImage, "Compute persistence image from barcode",
+        py::arg("barcode"), py::arg("size"), py::arg("min"), py::arg("max"));
 }

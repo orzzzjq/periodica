@@ -34,3 +34,5 @@
 build/
 build.ps1
 *.gif
+
+.vscode/
