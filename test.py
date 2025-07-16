@@ -10,6 +10,8 @@ from scipy.spatial import ConvexHull
 import matplotlib.animation as animation
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from matplotlib.patches import Polygon
+
 from functools import wraps
 from time import perf_counter
 
@@ -31,7 +33,9 @@ class Periodic:
     def generate_random_input(self, n, d):
         self.n = n      # number of points
         self.d = d      # dimension
-        self.U = np.random.rand(d, d) * 2 - 1       # original basis
+        # self.U = np.random.rand(d, d) * 2 - 1       # original basis
+        self.U = np.array([[0, np.sqrt(3)/2], [1, -1/2]])
+        np.random.seed(4)
         self.points = self.U @ np.random.rand(d, n) # points in unit cell
 
     def periodic_delaunay(self):
@@ -164,6 +168,7 @@ class Periodic:
         plt.get_current_fig_manager().set_window_title('Barcode')
         if show:
             plt.show()
+        plt.savefig('barcode.svg')
 
     def plot_diagram(self, show=True):
         if not hasattr(self, 'bcodes'):
@@ -203,6 +208,7 @@ class Periodic:
         plt.get_current_fig_manager().set_window_title('Diagram')
         if show:
             plt.show()
+        plt.savefig('diagram.svg')
             
     def plot_images(self, same_range=True, show=True):
         if not hasattr(self, 'persistence_images'):
@@ -256,6 +262,7 @@ class Periodic:
         plt.get_current_fig_manager().set_window_title('Image')
         if show:
             plt.show()
+        plt.savefig('image.svg')
 
     def domain_vertices(self, A, b):
         res = []
@@ -282,13 +289,17 @@ class Periodic:
                                 res.append(v)
         return np.array(res)    
 
-    def draw_polytope(self, A, b, ax, color='k', lw=1, ls='-', alpha=1):
+    def draw_polytope(self, A, b, ax, color='k', lw=1, ls='-', alpha=1, fill_color=False):
         domain_vertices = self.domain_vertices(A, b)
         hull = ConvexHull(domain_vertices)
 
         if A.shape[1] == 2:
             for simplex in hull.simplices:
                 ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], color=color, lw=lw, ls=ls, alpha=alpha)
+            if fill_color:
+                hull_polygon = Polygon(domain_vertices[hull.vertices], alpha=1, facecolor='#FBE5D6', 
+                                    edgecolor='None', linewidth=2, label='Convex Hull', zorder=-1)
+                ax.add_patch(hull_polygon)
         else:
             for simplex in hull.simplices:
                 ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], domain_vertices[simplex, 2], color=color, lw=lw, ls=ls, alpha=alpha)
@@ -328,11 +339,14 @@ class Periodic:
         if self.d == 2:
             ax = fig.add_subplot()
 
-            self.draw_unit_cell(self.V[:,:-1], ax, green)
-            self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='--')
-            self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=1)
+            # self.draw_unit_cell(self.V[:,:-1], ax, green)
+            ax.arrow(0, 0, self.V[0,0], self.V[1,0], color=green, width=0.01, head_width=0.04)
+            ax.arrow(0, 0, self.V[1,0], self.V[1,1], color=green, width=0.01, head_width=0.04)
 
-            ax.scatter(*P[:,self.n:], color=blue, s=5)
+            self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='-', fill_color='b')
+            self.draw_polytope(A, b * 3, ax, lw=0.75, ls='-', alpha=1)
+
+            ax.scatter(*P[:,self.n:], color='k', s=5, zorder=1)
             ax.scatter(*canonical_points, color='k', s=5)
             
             for s, t in delaunay_edges:
@@ -343,10 +357,10 @@ class Periodic:
                         s, t = t, s
                     if t >= self.n and s > I[t]:
                         arc = False
-                color = red if arc else 'k'
-                alpha = 0.5 if arc else 0.2
-                lw = 2 if arc else 1
-                ax.plot(*P[:,(s,t)], lw=lw, color=color, alpha=alpha)
+                color = '#0000FE' if arc else 'k'
+                alpha = 0.8 if arc else 0.2
+                lw = 1.5 if arc else 1
+                ax.plot(*P[:,(s,t)], lw=lw, color=color, alpha=alpha, zorder=0)
 
             ax.set_aspect(1)
         
@@ -370,7 +384,7 @@ class Periodic:
                     continue
                 color = red if arc else blue
                 alpha = 0.5 if arc else 0.2
-                ax.plot(*P[:,(s,t)], lw=2, color=color, alpha=alpha)
+                ax.plot(*P[:,(s,t)], lw=1, color=color, alpha=alpha)
             
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
             ax.set_box_aspect(np.ptp(limits, axis = 1))
@@ -379,24 +393,28 @@ class Periodic:
                 gif = animation.FuncAnimation(fig, lambda x: ax.view_init(azim=x), frames=np.arange(0, 362, 2), interval=100)
                 gif.save(animation_gif, dpi=80, writer='imagemagick')
         
+        ax.set_xticks([])
+        ax.set_yticks([])
+
         plt.get_current_fig_manager().set_window_title('Delaunay')
         if show:
             plt.show()
+        plt.savefig('delaunay.svg')
 
 
 
 periodic = Periodic()
 
-periodic.load_quotient_complex('examples/example_2d_1.txt')
+# periodic.load_quotient_complex('examples/example_2d_1.txt')
 # periodic.load_quotient_complex('examples/example_2d_2.txt')
 # periodic.load_quotient_complex('examples/example_3d_1.txt')
-# periodic.generate_random_input(n=10, d=3)
+periodic.generate_random_input(n=3, d=2)
 
-periodic.merge_tree()
+# periodic.merge_tree()
 # periodic.print_merge_tree()
-# periodic.plot_delaunay()
+periodic.plot_delaunay(show=False)
 
-periodic.images(size=50)
-periodic.plot_barcodes(show=False)
-periodic.plot_diagram(show=False)
-periodic.plot_images(same_range=True, show=True)
+# periodic.images(size=50)
+# periodic.plot_barcodes(show=False)
+# periodic.plot_diagram(show=False)
+# periodic.plot_images(same_range=True, show=False)
