@@ -10,9 +10,9 @@ PYTHON_PACKAGES ?= numpy matplotlib scipy
 
 .PHONY: all install-uv venv requirements build clean rebuild
 
-all: build
+all: requirements build
 
-install-uv:
+uv:
 	@if command -v uv >/dev/null 2>&1; then \
 		echo "uv already installed: $$(command -v uv)"; \
 	else \
@@ -27,7 +27,7 @@ install-uv:
 		fi; \
 	fi
 
-venv: install-uv
+venv: uv
 	@if [ -x "$(VENV_PY)" ]; then \
 		echo "venv already exists at $(VENV_DIR); skipping creation"; \
 	elif command -v uv >/dev/null 2>&1; then \
