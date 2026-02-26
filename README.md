@@ -8,7 +8,7 @@ length scales (encoded in the periodic merge tree and the
 topological descriptors). For more information, please check our 
 [CECAM workshop poster](cecam_poster.pdf).
 
-# Build
+## Build
 
 To build Periodica from source, please install [bazelisk](https://github.com/bazelbuild/bazelisk), and simply run
 
@@ -16,7 +16,7 @@ To build Periodica from source, please install [bazelisk](https://github.com/baz
 make
 ```
 
-# References
+## References
 
 Periodica is based on the following research papers:
 
