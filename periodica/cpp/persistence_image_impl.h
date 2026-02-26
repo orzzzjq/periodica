@@ -20,6 +20,7 @@
 // standard include
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include <iostream>
 #include <cmath>
 #include <limits>
@@ -29,6 +30,12 @@
 #include <functional>
 
 namespace Persistence_image {
+
+inline bool almost_equal(double lhs, double rhs, double rel_tol = 1e-12, double abs_tol = 1e-15) {
+  double diff = std::abs(lhs - rhs);
+  double scale = std::max(std::abs(lhs), std::abs(rhs));
+  return diff <= std::max(abs_tol, rel_tol * scale);
+}
 
 /**
  * This is a simple procedure to create n by n (or 2*pixel_radius times 2*pixel_radius cubical approximation of a

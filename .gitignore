@@ -36,3 +36,24 @@ build.ps1
 *.gif
 
 .vscode/
+
+# Bazel generated outputs/symlinks
+bazel-bin/
+bazel-out/
+bazel-testlogs/
+bazel-*
+
+# Bzlmod generated lockfile
+MODULE.bazel.lock
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# OS/editor noise
+.DS_Store
+
+# Program output files
+.svg

@@ -1,0 +1,258 @@
+module(name = "periodica", version = "0.1.0")
+
+bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "rules_python", version = "1.6.0")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
+
+http_archive(
+    name = "pybind11",
+    strip_prefix = "pybind11-2.13.6",
+    urls = ["https://github.com/pybind/pybind11/archive/refs/tags/v2.13.6.tar.gz"],
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "pybind11",
+    hdrs = glob([
+        "include/pybind11/**",
+    ]),
+    includes = ["include"],
+)
+""",
+)
+
+http_archive(
+    name = "eigen",
+    strip_prefix = "eigen-3.4.0",
+    urls = ["https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz"],
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "eigen",
+    hdrs = glob([
+        "Eigen/**",
+        "unsupported/**",
+    ]),
+    includes = ["."],
+)
+""",
+)
+
+http_archive(
+    name = "boost",
+    strip_prefix = "boost_1_86_0",
+    urls = ["https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz"],
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "boost_headers",
+    hdrs = glob(["boost/**"]),
+    includes = ["."],
+)
+""",
+)
+
+http_archive(
+    name = "cgal",
+    strip_prefix = "cgal-6.0.1",
+    urls = ["https://github.com/CGAL/cgal/archive/refs/tags/v6.0.1.tar.gz"],
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "cgal",
+    hdrs = glob(["**/include/CGAL/**"]),
+    includes = [
+        "AABB_tree/include",
+        "Advancing_front_surface_reconstruction/include",
+        "Algebraic_foundations/include",
+        "Algebraic_kernel_d/include",
+        "Algebraic_kernel_for_circles/include",
+        "Algebraic_kernel_for_spheres/include",
+        "Alpha_shapes_2/include",
+        "Alpha_shapes_3/include",
+        "Alpha_wrap_3/include",
+        "Apollonius_graph_2/include",
+        "Arithmetic_kernel/include",
+        "Arrangement_on_surface_2/include",
+        "BGL/include",
+        "Barycentric_coordinates_2/include",
+        "Basic_viewer/include",
+        "Boolean_set_operations_2/include",
+        "Bounding_volumes/include",
+        "Box_intersection_d/include",
+        "CGAL_Core/include",
+        "CGAL_ImageIO/include",
+        "CGAL_ipelets/include",
+        "Cartesian_kernel/include",
+        "Circular_kernel_2/include",
+        "Circular_kernel_3/include",
+        "Circulator/include",
+        "Classification/include",
+        "Combinatorial_map/include",
+        "Cone_spanners_2/include",
+        "Convex_decomposition_3/include",
+        "Convex_hull_2/include",
+        "Convex_hull_3/include",
+        "Convex_hull_d/include",
+        "Distance_2/include",
+        "Distance_3/include",
+        "Envelope_2/include",
+        "Envelope_3/include",
+        "Filtered_kernel/include",
+        "Generalized_map/include",
+        "Generator/include",
+        "GraphicsView/include",
+        "HalfedgeDS/include",
+        "Hash_map/include",
+        "Heat_method_3/include",
+        "Homogeneous_kernel/include",
+        "Hyperbolic_triangulation_2/include",
+        "Inscribed_areas/include",
+        "Installation/include",
+        "Interpolation/include",
+        "Intersections_2/include",
+        "Intersections_3/include",
+        "Interval_skip_list/include",
+        "Interval_support/include",
+        "Jet_fitting_3/include",
+        "Kernel_23/include",
+        "Kernel_d/include",
+        "Kinetic_space_partition/include",
+        "Kinetic_surface_reconstruction/include",
+        "LEDA/include",
+        "Linear_cell_complex/include",
+        "Matrix_search/include",
+        "Mesh_2/include",
+        "Mesh_3/include",
+        "Mesher_level/include",
+        "Minkowski_sum_2/include",
+        "Minkowski_sum_3/include",
+        "Modifier/include",
+        "Modular_arithmetic/include",
+        "Nef_2/include",
+        "Nef_3/include",
+        "Nef_S2/include",
+        "NewKernel_d/include",
+        "Number_types/include",
+        "Optimal_bounding_box/include",
+        "Optimal_transportation_reconstruction_2/include",
+        "Optimisation_basic/include",
+        "Orthtree/include",
+        "Partition_2/include",
+        "Periodic_2_triangulation_2/include",
+        "Periodic_3_mesh_3/include",
+        "Periodic_3_triangulation_3/include",
+        "Periodic_4_hyperbolic_triangulation_2/include",
+        "Point_set_2/include",
+        "Point_set_3/include",
+        "Point_set_processing_3/include",
+        "Poisson_surface_reconstruction_3/include",
+        "Polygon/include",
+        "Polygon_mesh_processing/include",
+        "Polygon_repair/include",
+        "Polygonal_surface_reconstruction/include",
+        "Polyhedron/include",
+        "Polyline_simplification_2/include",
+        "Polynomial/include",
+        "Polytope_distance_d/include",
+        "Principal_component_analysis/include",
+        "Principal_component_analysis_LGPL/include",
+        "Profiling_tools/include",
+        "Property_map/include",
+        "QP_solver/include",
+        "Random_numbers/include",
+        "Ridges_3/include",
+        "SMDS_3/include",
+        "STL_Extension/include",
+        "Scale_space_reconstruction_3/include",
+        "SearchStructures/include",
+        "Segment_Delaunay_graph_2/include",
+        "Segment_Delaunay_graph_Linf_2/include",
+        "Set_movable_separability_2/include",
+        "Shape_detection/include",
+        "Shape_regularization/include",
+        "Skin_surface_3/include",
+        "Snap_rounding_2/include",
+        "Solver_interface/include",
+        "Spatial_searching/include",
+        "Spatial_sorting/include",
+        "Straight_skeleton_2/include",
+        "Straight_skeleton_extrusion_2/include",
+        "Stream_lines_2/include",
+        "Stream_support/include",
+        "Subdivision_method_3/include",
+        "Surface_mesh/include",
+        "Surface_mesh_approximation/include",
+        "Surface_mesh_deformation/include",
+        "Surface_mesh_parameterization/include",
+        "Surface_mesh_segmentation/include",
+        "Surface_mesh_shortest_path/include",
+        "Surface_mesh_simplification/include",
+        "Surface_mesh_skeletonization/include",
+        "Surface_mesh_topology/include",
+        "Surface_mesher/include",
+        "Surface_sweep_2/include",
+        "TDS_2/include",
+        "TDS_3/include",
+        "Testsuite/include",
+        "Tetrahedral_remeshing/include",
+        "Three/include",
+        "Triangulation/include",
+        "Triangulation_2/include",
+        "Triangulation_3/include",
+        "Triangulation_on_sphere_2/include",
+        "Union_find/include",
+        "Visibility_2/include",
+        "Voronoi_diagram_2/include",
+        "Weights/include",
+    ],
+    deps = [
+        "@boost//:boost_headers",
+        "@eigen//:eigen",
+    ],
+)
+""",
+)
+
+git_repository(
+    name = "gudhi",
+    remote = "https://github.com/GUDHI/gudhi-devel.git",
+    commit = "0e59e57",
+    build_file_content = """
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//visibility:public"])
+
+cc_library(
+    name = "gudhi",
+    hdrs = glob([
+        "src/Alpha_complex/include/gudhi/**",
+        "src/Simplex_tree/include/gudhi/**",
+        "src/common/include/gudhi/**",
+    ]),
+    includes = [
+        "src/Alpha_complex/include",
+        "src/Simplex_tree/include",
+        "src/common/include",
+    ],
+    deps = [
+        "@boost//:boost_headers",
+        "@cgal//:cgal",
+        "@eigen//:eigen",
+    ],
+)
+""",
+)

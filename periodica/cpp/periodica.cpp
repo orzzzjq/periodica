@@ -9,7 +9,7 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(periodica, m) {
+PYBIND11_MODULE(_periodica, m) {
    m.def("delaunay_skeleton", &DELAUNAY::DelaunaySkeleton, 
         "Compute 1-skeleton of 2D & 3D Delaunay triangulations",
         py::arg("points"));

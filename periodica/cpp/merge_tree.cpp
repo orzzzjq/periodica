@@ -11,23 +11,23 @@ double inputVolumeInv = 1;
 // The class for lattice operations
 template <typename integer>
 class Lattice {
-	typedef Matrix<integer, Dynamic, Dynamic> Matrix;
+	typedef Matrix<integer, Dynamic, Dynamic> MatrixType;
 
 private:
-	Matrix V; // basis of the lattice
+	MatrixType V; // basis of the lattice
 
 public:
 	Lattice() {}
-	Lattice(int dimension) { V = Matrix(dimension, 0); }
+	Lattice(int dimension) { V = MatrixType(dimension, 0); }
 	Lattice(int dimension, int size) {
-		V = Matrix(dimension, size); 
+		V = MatrixType(dimension, size); 
 		V.setZero();
 	}
-	Lattice(const Matrix& V) : V(V) {}
+	Lattice(const MatrixType& V) : V(V) {}
 
 	integer dimension() const { return V.rows(); }
 	integer size() const { return V.cols(); }
-	Matrix& basis() { return V; }
+	MatrixType& basis() { return V; }
 
 	integer operator()(int i, int j) const { return V(i, j); }
 	integer& operator()(int i, int j) { return V(i, j); }
@@ -37,7 +37,7 @@ public:
 		if (this->dimension() != L.dimension()) {
 			throw std::invalid_argument("lattices in different dimensions");
 		}
-		Matrix NewBasis(this->dimension(), this->size() + L.size());
+		MatrixType NewBasis(this->dimension(), this->size() + L.size());
 		for (int i = 0; i < this->dimension(); ++i) {
 			for (int j = 0; j < this->size(); ++j) {
 				NewBasis(i, j) = V(i, j);
@@ -50,7 +50,7 @@ public:
 	}
 
 	// compute HNF of an integer matrix
-	Matrix HermiteNormalForm(Matrix& M) {
+	MatrixType HermiteNormalForm(MatrixType& M) {
 		// column index, for implicit column exchange
 		std::vector<int> colid(M.cols()); 
 		for (int j = 0; j < M.cols(); ++j) colid[j] = j;
@@ -109,7 +109,7 @@ public:
 		
 		// collect the final result
 		int finalsize = j;
-		Matrix Reduced(rows, finalsize);
+		MatrixType Reduced(rows, finalsize);
 		for (i = 0; i < rows; ++i) {
 			for (j = 0; j < finalsize; ++j) {
 				Reduced(i, j) = M(i, colid[j]);
@@ -182,7 +182,7 @@ public:
 
 	std::string toString() {
 		char s[50];
-		sprintf_s(s, "%.3f %sR^%d", _ratio * unitBallVolume[_exponent], (_exponent > 1 ? "pi" : ""), _exponent);
+		std::snprintf(s, sizeof(s), "%.3f %sR^%d", _ratio * unitBallVolume[_exponent], (_exponent > 1 ? "pi" : ""), _exponent);
 		return std::string(s);
 	}
 };
@@ -230,7 +230,7 @@ public:
 template <typename integer>
 class Vertex : public Simplex {
 	typedef Matrix<integer, Dynamic, 1> Vector;
-	typedef Lattice<integer> Lattice;
+	typedef Lattice<integer> LatticeType;
 
 private:
 	int _root, _next; // indices of root, next. -1 for null.
@@ -238,18 +238,18 @@ private:
 	double _old; // birth time of the oldest child
 	int _oldId; // index of the oldest child
 	Vector _drift; // the drift vector
-	Lattice _lattice; // the periodic lattice
+	LatticeType _lattice; // the periodic lattice
 
 public:
 	Vertex() : Simplex(0, 0), _root(0), _next(-1), _size(1), _old(0.0), _oldId(0) {
 		_drift = Vector(0, 1);
-		_lattice = Lattice(_drift);
+		_lattice = LatticeType(_drift);
 	}
 
 	// construct with filtration value, dimensionality, and index
 	Vertex(int id, double f, int d) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f), _oldId(id) {
 		_drift = Vector(d, 1); _drift.setZero();
-		_lattice = Lattice(d);
+		_lattice = LatticeType(d);
 	}
 
 	void driftAdd(const Vector& v) {
@@ -262,7 +262,7 @@ public:
 	double& old() { return _old; }
 	int& oldId() { return _oldId; }
 	Vector& drift() { return _drift; }
-	Lattice& lattice() { return _lattice; }
+	LatticeType& lattice() { return _lattice; }
 };
 
 typedef int integer;
@@ -407,10 +407,10 @@ public:
 	std::string toString() {
 		char s[100];
 		if (_death == std::numeric_limits<double>::max()) {
-			sprintf_s(s, "[%.3f, +inf) %.3f", _birth, _multiplicity);
+			std::snprintf(s, sizeof(s), "[%.3f, +inf) %.3f", _birth, _multiplicity);
 		}
 		else {
-			sprintf_s(s, "[%.3f, %.3f] %.3f", _birth, _death, _multiplicity);
+			std::snprintf(s, sizeof(s), "[%.3f, %.3f] %.3f", _birth, _death, _multiplicity);
 		}
 		return std::string(s);
 	}

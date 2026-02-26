@@ -1,8 +1,9 @@
-import sys
-sys.path.insert(1, './build/Release')
+"""High-level Python API built on top of the native _periodica extension."""
 
-import re
-import periodica
+try:
+    from . import _periodica
+except ImportError:
+    import _periodica
 import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -21,7 +22,7 @@ def timing(f):
         ts = perf_counter()
         result = f(*args, **kw)
         te = perf_counter()
-        print(f'func: {f.__name__} took: {te-ts} sec')
+        print(f'[TIME] {f.__name__} took: {te-ts:.3f} sec')
         return result
     return wrap
 
@@ -29,20 +30,20 @@ red = "#CD0000"
 blue = "#7E7EFF"
 green = "#30B830"
 
-class Periodic:
-    def generate_random_input(self, n, d):
+class Periodica:
+    def generate_random_input(self, n, d, seed=4):
         self.n = n      # number of points
         self.d = d      # dimension
-        # self.U = np.random.rand(d, d) * 2 - 1       # original basis
-        self.U = np.array([[0, np.sqrt(3)/2], [1, -1/2]])
-        np.random.seed(4)
+        # self.U = np.array([[0, np.sqrt(3)/2], [1, -1/2]])
+        np.random.seed(seed)
+        self.U = np.random.rand(d, d) * 2 - 1       # original basis
         self.points = self.U @ np.random.rand(d, n) # points in unit cell
 
     def periodic_delaunay(self):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
-        self.V = periodica.reduced_basis(self.U)    # reduced basis
-        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = periodica.periodic_delaunay(self.U, self.points)
+        self.V = _periodica.reduced_basis(self.U)    # reduced basis
+        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = _periodica.periodic_delaunay(self.U, self.points)
 
     def quotient_complex(self, complex_type='delaunay'):
         if complex_type == 'delaunay':
@@ -99,20 +100,20 @@ class Periodic:
         if not hasattr(self, 'quotient_arcs'):
             self.quotient_complex()
         if hasattr(self, 'quotient_vertex_filtration'):
-            self.tree = periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift, self.quotient_vertex_filtration)
+            self.tree = _periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift, self.quotient_vertex_filtration)
         else:
-            self.tree = periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
+            self.tree = _periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
         return self.tree
 
     def print_merge_tree(self):
         if not hasattr(self, 'tree'):
             self.merge_tree()
-        periodica.print_merge_tree(self.tree)
+        _periodica.print_merge_tree(self.tree)
 
     def barcodes(self):
         if not hasattr(self, 'tree'):
             self.merge_tree()
-        self.bcodes = periodica.barcode(self.d, self.tree)
+        self.bcodes = _periodica.barcode(self.d, self.tree)
         return self.bcodes
     
     def images(self, size=100):
@@ -127,7 +128,7 @@ class Periodic:
         
         self.persistence_images = []
         for i in range(self.d + 1):
-            self.persistence_images.append(periodica.image(self.bcodes[i], size, xmin, xmax))
+            self.persistence_images.append(_periodica.image(self.bcodes[i], size, xmin, xmax))
         return self.persistence_images
 
     def plot_barcodes(self, show=True):
@@ -327,12 +328,12 @@ class Periodic:
         if not hasattr(self, 'points'):
             raise Exception('No input points')
         if not hasattr(self, 'V'):
-            self.V = periodica.reduced_basis(self.U)
+            self.V = _periodica.reduced_basis(self.U)
         
-        A, b =  periodica.dirichlet_domain(self.V)
-        canonical_points = periodica.canonical_points(A, b, self.points)
-        P, I, S = periodica.points_in_3x_domain(self.V, A, b, canonical_points)
-        delaunay_edges = periodica.delaunay_skeleton(P)
+        A, b =  _periodica.dirichlet_domain(self.V)
+        canonical_points = _periodica.canonical_points(A, b, self.points)
+        P, I, S = _periodica.points_in_3x_domain(self.V, A, b, canonical_points)
+        delaunay_edges = _periodica.delaunay_skeleton(P)
 
         fig = plt.figure()
 
@@ -400,21 +401,3 @@ class Periodic:
         if show:
             plt.show()
         plt.savefig('delaunay.svg')
-
-
-
-periodic = Periodic()
-
-# periodic.load_quotient_complex('examples/example_2d_1.txt')
-# periodic.load_quotient_complex('examples/example_2d_2.txt')
-# periodic.load_quotient_complex('examples/example_3d_1.txt')
-periodic.generate_random_input(n=3, d=2)
-
-# periodic.merge_tree()
-# periodic.print_merge_tree()
-periodic.plot_delaunay(show=False)
-
-# periodic.images(size=50)
-# periodic.plot_barcodes(show=False)
-# periodic.plot_diagram(show=False)
-# periodic.plot_images(same_range=True, show=False)
