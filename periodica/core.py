@@ -350,6 +350,7 @@ class Periodica:
             ax.scatter(*P[:,self.n:], color='k', s=5, zorder=1)
             ax.scatter(*canonical_points, color='k', s=5)
             
+            shift_set = set()
             for s, t in delaunay_edges:
                 arc = False
                 if s < self.n or t < self.n:
@@ -358,6 +359,11 @@ class Periodica:
                         s, t = t, s
                     if t >= self.n and s > I[t]:
                         arc = False
+                    if s == I[t]:
+                        if str(-S[:,t]) in shift_set:
+                            arc = False
+                        else:
+                            shift_set.add(str(S[:,t]))
                 color = '#0000FE' if arc else 'k'
                 alpha = 0.8 if arc else 0.2
                 lw = 1.5 if arc else 1

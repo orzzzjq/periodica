@@ -1,6 +1,9 @@
 #include "auxiliary.h"
 #include "delaunay.h"
 
+#include <string>
+#include <unordered_set>
+
 namespace DELAUNAY {
 using namespace std;
 
@@ -465,11 +468,27 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 
     // Filter the periodic edges (have at least one end point in the 1x domain
     vector<pair<int,int>> quotient_edges;
+    unordered_set<string> shift_set;
     for (int i = 0; i < delaunay_edges.rows(); ++i) {
         int s = delaunay_edges(i, 0), t = delaunay_edges(i, 1);
         if (s < n || t < n) {
             if (s > t) swap(s, t); // let the first point be the one with smaller index
             if (t >= n && s > I(t)) continue;
+            if (s == I(t)) { // If it's a self-loop, check if the opposite direction is already inserted
+                string shift_key, opposite_key;
+                shift_key.reserve(static_cast<size_t>(d) * 8);
+                opposite_key.reserve(static_cast<size_t>(d) * 8);
+                for (int j = 0; j < d; ++j) {
+                    if (j > 0) shift_key.push_back(',');
+                    if (j > 0) opposite_key.push_back(',');
+                    shift_key += to_string(S(j, t));
+                    opposite_key += to_string(-S(j, t));
+                }
+                if (shift_set.find(opposite_key) != shift_set.end()) {
+                    continue;
+                }
+                shift_set.insert(shift_key);
+            }
             quotient_edges.push_back({s, t});
         }
     }
