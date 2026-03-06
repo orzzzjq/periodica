@@ -35,6 +35,7 @@ build/
 build.ps1
 *.gif
 *.svg
+todo/
 
 .vscode/
 

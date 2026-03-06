@@ -38,12 +38,20 @@ class Periodica:
         np.random.seed(seed)
         self.U = np.random.rand(d, d) * 2 - 1       # original basis
         self.points = self.U @ np.random.rand(d, n) # points in unit cell
+        self.weights = np.random.rand(n)
+        # self.weights = np.zeros(n)
+        print(self.weights)
 
     def periodic_delaunay(self):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
+        weights = getattr(self, 'weights', np.zeros(self.points.shape[1], dtype=float))
+        weights = np.asarray(weights, dtype=float).reshape(-1)
+        if weights.shape[0] != self.points.shape[1]:
+            raise Exception('weights length must equal number of points')
+        self.weights = weights
         self.V = _periodica.reduced_basis(self.U)    # reduced basis
-        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = _periodica.periodic_delaunay(self.U, self.points)
+        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = _periodica.periodic_delaunay(self.U, self.points, self.weights)
 
     def quotient_complex(self, complex_type='delaunay'):
         if complex_type == 'delaunay':
@@ -333,7 +341,14 @@ class Periodica:
         A, b =  _periodica.dirichlet_domain(self.V)
         canonical_points = _periodica.canonical_points(A, b, self.points)
         P, I, S = _periodica.points_in_3x_domain(self.V, A, b, canonical_points)
-        delaunay_edges = _periodica.delaunay_skeleton(P)
+        if hasattr(self, 'weights'):
+            weights = np.asarray(self.weights, dtype=float).reshape(-1)
+            if weights.shape[0] != self.points.shape[1]:
+                raise Exception('weights length must equal number of points')
+            working_weights = weights[I]
+            delaunay_edges = _periodica.weighted_delaunay_skeleton(P, working_weights)
+        else:
+            delaunay_edges = _periodica.delaunay_skeleton(P)
 
         fig = plt.figure()
 
@@ -360,10 +375,12 @@ class Periodica:
                     if t >= self.n and s > I[t]:
                         arc = False
                     if s == I[t]:
-                        if str(-S[:,t]) in shift_set:
+                        shift_key = str(s) + str(S[:,t])
+                        opposite_key = str(s) + str(-S[:,t])
+                        if opposite_key in shift_set:
                             arc = False
                         else:
-                            shift_set.add(str(S[:,t]))
+                            shift_set.add(shift_key)
                 color = '#0000FE' if arc else 'k'
                 alpha = 0.8 if arc else 0.2
                 lw = 1.5 if arc else 1

@@ -72,6 +72,84 @@ Eigen::MatrixXi DelaunaySkeleton(
     return result;
 }
 
+// Compute the 1-skeleton of the weighted Delaunay triangulation
+// Input:
+//  Points: MatrixXd(d, N)
+//  Weights: VectorXd(N)
+// Output:
+//  Delaunay edges: MatrixXi(M, 2)
+//  * Here M is the number of Delaunay edges
+Eigen::MatrixXi DelaunaySkeleton(
+    const Eigen::MatrixXd& points,
+    const Eigen::VectorXd& weights
+) {
+    if (points.rows() != 2 && points.rows() != 3) {
+        throw std::invalid_argument("Input must be a 2D NumPy array of shape (2, n) or (3, n)");
+    }
+
+    int n = points.cols(), d = points.rows();
+    if (weights.size() != n) {
+        throw std::invalid_argument("weights size must be equal to the number of points");
+    }
+
+    Gudhi::Simplex_tree complex;
+
+    if (d == 2) {
+        vector<double> coord(2);
+        vector<Point2> p;
+        vector<double> w;
+        p.reserve(n);
+        w.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            for (int j = 0; j < d; ++j) {
+                coord[j] = points(j, i);
+            }
+            p.push_back(Point2(coord[0], coord[1]));
+            w.push_back(weights(i));
+        }
+        Gudhi::alpha_complex::Alpha_complex<K2, true> alphaComplex(p, w);
+        alphaComplex.create_complex(complex, INFINITY, false, true);
+    }
+    else {
+        vector<double> coord(3);
+        vector<Point3> p;
+        vector<double> w;
+        p.reserve(n);
+        w.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            for (int j = 0; j < d; ++j) {
+                coord[j] = points(j, i);
+            }
+            p.push_back(Point3(coord[0], coord[1], coord[2]));
+            w.push_back(weights(i));
+        }
+        Gudhi::alpha_complex::Alpha_complex<K3, true> alphaComplex(p, w);
+        alphaComplex.create_complex(complex, INFINITY, false, true);
+    }
+
+    vector<vector<int>> edges;
+
+    for (auto simplex : complex.skeleton_simplex_range(1)) {
+        if (complex.dimension(simplex)) {
+            vector<int> id;
+            for (auto v : complex.simplex_vertex_range(simplex)) {
+                id.push_back(int(v));
+            }
+            edges.push_back(id);
+        }
+    }
+
+    Eigen::MatrixXi result(size(edges), 2);
+
+    for (size_t i = 0; i < size(edges); ++i) {
+        for (size_t j = 0; j < 2; ++j) {
+            result(i, j) = edges[i][j];
+        }
+    }
+
+    return result;
+}
+
 // Compute the Euclidean MST of a point set
 Eigen::MatrixXi EuclideanMST(
     const Eigen::MatrixXd& points
@@ -443,10 +521,14 @@ std::tuple<Eigen::MatrixXd, Eigen::VectorXi, Eigen::MatrixXi> pointsIn3xDomain(
 //  Shift vectors: MatrixXi(d, m)
 std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
     const Eigen::MatrixXd& U,       // lattice basis
-    const Eigen::MatrixXd& points   // points in unit cell
+    const Eigen::MatrixXd& points,  // points in unit cell
+    const Eigen::VectorXd& weights  // weights of points in unit cell
 ) {
     if (U.cols() != U.rows() || U.rows() != points.rows()) {
         throw std::invalid_argument("Invalid input");
+    }
+    if (weights.size() != points.cols()) {
+        throw std::invalid_argument("weights size must be equal to the number of points");
     }
 
     int d = points.rows(), n = points.cols();
@@ -462,9 +544,13 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 
     // Points in the 3x Dirichlet domain, together with original index and shift vectors
     auto [working_points, I, S] = pointsIn3xDomain(V, A, b, canonical_points);
+    Eigen::VectorXd working_weights(working_points.cols());
+    for (int i = 0; i < working_points.cols(); ++i) {
+        working_weights(i) = weights(I(i));
+    }
 
-    // Delaunay complex from point in the 3x domain
-    auto delaunay_edges = DelaunaySkeleton(working_points);
+    // Weighted Delaunay complex from points in the 3x domain
+    auto delaunay_edges = DelaunaySkeleton(working_points, working_weights);
 
     // Filter the periodic edges (have at least one end point in the 1x domain
     vector<pair<int,int>> quotient_edges;
@@ -476,11 +562,13 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
             if (t >= n && s > I(t)) continue;
             if (s == I(t)) { // If it's a self-loop, check if the opposite direction is already inserted
                 string shift_key, opposite_key;
-                shift_key.reserve(static_cast<size_t>(d) * 8);
-                opposite_key.reserve(static_cast<size_t>(d) * 8);
+                shift_key.reserve(static_cast<size_t>(d + 1) * 8);
+                opposite_key.reserve(static_cast<size_t>(d + 1) * 8);
+                shift_key += to_string(s);
+                opposite_key += to_string(s);
                 for (int j = 0; j < d; ++j) {
-                    if (j > 0) shift_key.push_back(',');
-                    if (j > 0) opposite_key.push_back(',');
+                    shift_key.push_back(',');
+                    opposite_key.push_back(',');
                     shift_key += to_string(S(j, t));
                     opposite_key += to_string(-S(j, t));
                 }

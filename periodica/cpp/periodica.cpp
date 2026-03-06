@@ -10,9 +10,12 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(_periodica, m) {
-   m.def("delaunay_skeleton", &DELAUNAY::DelaunaySkeleton, 
+   m.def("delaunay_skeleton", py::overload_cast<const Eigen::MatrixXd&>(&DELAUNAY::DelaunaySkeleton), 
         "Compute 1-skeleton of 2D & 3D Delaunay triangulations",
         py::arg("points"));
+   m.def("weighted_delaunay_skeleton", py::overload_cast<const Eigen::MatrixXd&, const Eigen::VectorXd&>(&DELAUNAY::DelaunaySkeleton),
+        "Compute 1-skeleton of 2D & 3D weighted Delaunay triangulations",
+        py::arg("points"), py::arg("weights"));
    m.def("euclidean_mst", &DELAUNAY::EuclideanMST, 
         "Compute 2D & 3D Euclidean minimum spanning trees",
         py::arg("points"));
@@ -30,7 +33,7 @@ PYBIND11_MODULE(_periodica, m) {
         py::arg("V"), py::arg("A"), py::arg("b"), py::arg("canonical_points"));
    m.def("periodic_delaunay", &DELAUNAY::periodicDelaunay, 
         "Compute quotient complex from periodic Delaunay complex",
-        py::arg("U"), py::arg("points"));
+        py::arg("U"), py::arg("points"), py::arg("weights"));
    m.def("merge_tree", &PMT::mergeTree, "Compute periodic merge tree from a quotient complex",
         py::arg("n"), py::arg("d"), py::arg("V"),
         py::arg("arcs"), py::arg("arc_filtration"), py::arg("arc_shift"),
