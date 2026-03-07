@@ -1,6 +1,7 @@
 #include "auxiliary.h"
 #include "delaunay.h"
 
+#include <CGAL/number_utils.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -631,6 +632,54 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
     return {edges, filtration, shift};
 }
 
+Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {
+    if (vertices.empty()) {
+        throw std::invalid_argument("vertices must be non-empty");
+    }
+
+    int d = static_cast<int>(vertices[0].size());
+    if (d != 2 && d != 3) {
+        throw std::invalid_argument("Only 2D and 3D circumcenters are supported");
+    }
+    if (static_cast<int>(vertices.size()) != d + 1) {
+        throw std::invalid_argument("A full simplex must have d+1 vertices");
+    }
+    for (const auto& v : vertices) {
+        if (static_cast<int>(v.size()) != d) {
+            throw std::invalid_argument("Inconsistent vertex dimensions");
+        }
+    }
+
+    Eigen::VectorXd result = Eigen::VectorXd::Zero(d);
+    if (d == 2) {
+        K2 kernel;
+        vector<Point2> pts;
+        pts.reserve(3);
+        for (const auto& v : vertices) {
+            pts.emplace_back(v(0), v(1));
+        }
+        Point2 center = kernel.construct_circumcenter_d_object()(pts.begin(), pts.end());
+        auto coord = kernel.compute_coordinate_d_object();
+        for (int j = 0; j < d; ++j) {
+            result(j) = CGAL::to_double(coord(center, j));
+        }
+    } else {
+        K3 kernel;
+        vector<Point3> pts;
+        pts.reserve(4);
+        for (const auto& v : vertices) {
+            pts.emplace_back(v(0), v(1), v(2));
+        }
+        Point3 center = kernel.construct_circumcenter_d_object()(pts.begin(), pts.end());
+        auto coord = kernel.compute_coordinate_d_object();
+        for (int j = 0; j < d; ++j) {
+            result(j) = CGAL::to_double(coord(center, j));
+        }
+    }
+
+    return result;
+}
+
 // Compute the Voronoi 1-skeleton of the points in 3x Direchlet region
 // Output:
 //  Voronoi points: MatrixXd(d, l)
@@ -640,7 +689,8 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
     const Eigen::MatrixXd& U,       // lattice basis
     const Eigen::MatrixXd& points,  // points in unit cell
-    const Eigen::VectorXd& weights  // weights of points in unit cell
+    const Eigen::VectorXd& weights, // weights of points in unit cell
+    bool useCircumCenter
 ) {
     if (U.cols() != U.rows() || U.rows() != points.rows()) {
         throw std::invalid_argument("Invalid input");
@@ -688,17 +738,28 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
         if (delaunay_complex.dimension(simplex) != d) continue;
 
         vector<int> vertices;
-        Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
         bool in_1x_domain = false;
         for (auto v : delaunay_complex.simplex_vertex_range(simplex)) {
             int vi = static_cast<int>(v);
             vertices.push_back(vi);
-            center += working_points.col(vi);
             if (vi < n) in_1x_domain = true;
         }
 
         sort(vertices.begin(), vertices.end());
-        center /= static_cast<double>(vertices.size());
+        Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
+        if (useCircumCenter) {
+            vector<Eigen::VectorXd> simplex_points;
+            simplex_points.reserve(vertices.size());
+            for (int vi : vertices) {
+                simplex_points.push_back(working_points.col(vi));
+            }
+            center = circumCenter(simplex_points);
+        } else {
+            for (int vi : vertices) {
+                center += working_points.col(vi);
+            }
+            center /= static_cast<double>(vertices.size());
+        }
 
         int id = static_cast<int>(simplex_vertices.size());
         simplex_id_map.emplace(simplexKey(vertices), id);

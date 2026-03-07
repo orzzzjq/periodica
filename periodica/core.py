@@ -437,7 +437,7 @@ class Periodica:
             plt.show()
         plt.savefig('delaunay.svg')
 
-    def plot_voronoi(self, show=True, animation_gif=None):
+    def plot_voronoi(self, show=True, animation_gif=None, use_circumcenter=False):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
         if not hasattr(self, 'V'):
@@ -449,15 +449,9 @@ class Periodica:
         if not hasattr(self, 'weights'):
             self.weights = np.zeros(self.n)
         
-        voronoi_points, voronoi_edges = _periodica.full_voronoi(self.U, self.points, self.weights)
-
-        print(voronoi_points)
-        print(voronoi_edges)
-
-        ax.scatter(*voronoi_points, color='r')
-        for s, t in voronoi_edges:
-            print(s,t)
-            ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
+        voronoi_points, voronoi_edges = _periodica.full_voronoi(
+            self.U, self.points, self.weights, use_circumcenter
+        )
 
         A, b =  _periodica.dirichlet_domain(self.V)
         canonical_points = _periodica.canonical_points(A, b, self.points)
@@ -471,10 +465,12 @@ class Periodica:
         else:
             delaunay_edges = _periodica.delaunay_skeleton(P)
 
-
-
         if self.d == 2:
-            # ax = fig.add_subplot()
+            ax = fig.add_subplot()
+            
+            ax.scatter(*voronoi_points, color='r')
+            for s, t in voronoi_edges:
+                ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
 
             # self.draw_unit_cell(self.V[:,:-1], ax, green)
             ax.arrow(0, 0, self.V[0,0], self.V[1,0], color=green, width=0.01, head_width=0.04)
@@ -513,6 +509,10 @@ class Periodica:
             ax = fig.add_subplot(projection='3d')
 
             self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=0.5)
+
+            ax.scatter(*voronoi_points, color='r')
+            for s, t in voronoi_edges:
+                ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
 
             ax.scatter(*P[:,self.n:], color=blue, s=5)
             ax.scatter(*canonical_points, color=red, s=5)

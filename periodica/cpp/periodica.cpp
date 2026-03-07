@@ -36,7 +36,7 @@ PYBIND11_MODULE(_periodica, m) {
         py::arg("U"), py::arg("points"), py::arg("weights"));
    m.def("full_voronoi", &DELAUNAY::fullVoronoiSkeleton, 
         "Compute the dual complex of the Delaunay of the points in the 3X Dirichlet domain",
-        py::arg("U"), py::arg("points"), py::arg("weights"));
+        py::arg("U"), py::arg("points"), py::arg("weights"), py::arg("useCircumCenter") = false);
    m.def("merge_tree", &PMT::mergeTree, "Compute periodic merge tree from a quotient complex",
         py::arg("n"), py::arg("d"), py::arg("V"),
         py::arg("arcs"), py::arg("arc_filtration"), py::arg("arc_shift"),

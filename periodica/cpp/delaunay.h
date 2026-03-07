@@ -4,6 +4,7 @@
 
 #include <CGAL/squared_distance_2.h> //for 2D functions
 #include <CGAL/squared_distance_3.h> //for 3D functions
+// #include <CGAL/Kernel/global_functions.h>
 
 #include <CGAL/Epeck_d.h>
 #include <CGAL/Random.h>
@@ -60,6 +61,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
     const Eigen::MatrixXd& U,
     const Eigen::MatrixXd& points,
-    const Eigen::VectorXd& weights);
+    const Eigen::VectorXd& weights,
+    bool useCircumCenter = false);
 
 }
