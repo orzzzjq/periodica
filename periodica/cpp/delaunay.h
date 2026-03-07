@@ -57,4 +57,9 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
     const Eigen::MatrixXd& points,
     const Eigen::VectorXd& weights);
 
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
+    const Eigen::MatrixXd& U,
+    const Eigen::MatrixXd& points,
+    const Eigen::VectorXd& weights);
+
 }

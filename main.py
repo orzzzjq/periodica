@@ -26,16 +26,35 @@ def run_3d_quotient_example():
 
 def run_2d_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_input(n=2, d=2, seed=2)
+    periodica.generate_random_points(n=2, d=2, seed=2)
     periodica.plot_delaunay(show=True)
     periodica.print_merge_tree()
     # periodica.plot_barcodes(show=False)
     # periodica.plot_diagram(show=False)
     # periodica.plot_images(same_range=True, show=True)
+    
+def run_2d_voronoi_example():
+    periodica = Periodica()
+    periodica.generate_random_points(n=5, d=2, seed=0)
+    periodica.plot_voronoi(show=True)
+    # periodica.print_merge_tree()
+
+def run_2d_grid_example():
+    periodica = Periodica()
+    periodica.generate_grid_points(d=2, k=3)
+    periodica.plot_delaunay(show=True)
+
+def run_2d_weighted_grid_example():
+    periodica = Periodica()
+    periodica.generate_grid_points(d=2, k=3)
+    weights = [0] * periodica.n
+    weights[0] = 0.1
+    periodica.set_weights(weights)
+    periodica.plot_delaunay(show=True)
 
 def run_2d_weighted_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_input(n=5, d=2, seed=3)
+    periodica.generate_random_points(n=10, d=2)
     periodica.plot_delaunay(show=True)
     periodica.print_merge_tree()
     # periodica.plot_barcodes(show=False)
@@ -44,7 +63,7 @@ def run_2d_weighted_delaunay_example():
 
 def run_3d_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_input(n=4, d=3)
+    periodica.generate_random_points(n=4, d=3)
     periodica.plot_delaunay(show=False)
     periodica.print_merge_tree()
     periodica.plot_barcodes(show=False)
@@ -53,7 +72,7 @@ def run_3d_delaunay_example():
 
 def run_3d_weighted_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_input(n=4, d=3)
+    periodica.generate_random_points(n=4, d=3)
     periodica.plot_delaunay(show=False)
     periodica.print_merge_tree()
     periodica.plot_barcodes(show=False)
@@ -69,4 +88,9 @@ if __name__ == "__main__":
     # run_3d_delaunay_example()
 
     # run_2d_weighted_delaunay_example()
-    run_3d_weighted_delaunay_example()
+    # run_3d_weighted_delaunay_example()
+
+    # run_2d_grid_example()
+    # run_2d_weighted_grid_example()
+
+    run_2d_voronoi_example()

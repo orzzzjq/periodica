@@ -31,16 +31,28 @@ blue = "#7E7EFF"
 green = "#30B830"
 
 class Periodica:
-    def generate_random_input(self, n, d, seed=4):
+    def generate_random_points(self, n, d, seed=4):
+        np.random.seed(seed)
         self.n = n      # number of points
         self.d = d      # dimension
-        # self.U = np.array([[0, np.sqrt(3)/2], [1, -1/2]])
-        np.random.seed(seed)
         self.U = np.random.rand(d, d) * 2 - 1       # original basis
         self.points = self.U @ np.random.rand(d, n) # points in unit cell
-        self.weights = np.random.rand(n)
-        # self.weights = np.zeros(n)
-        print(self.weights)
+
+    def generate_grid_points(self, d, k, seed=4):
+        np.random.seed(seed)
+        self.d = d      # dimension
+        self.U = np.random.rand(d, d) * 2 - 1       # original basis
+
+        # Uniform grid in [0, 1), with k samples per axis and 1 excluded.
+        axis = np.arange(k, dtype=float) / float(k)
+        mesh = np.meshgrid(*([axis] * d), indexing='ij')
+        grid = np.stack([m.reshape(-1) for m in mesh], axis=0)
+
+        self.n = grid.shape[1]  # total number of grid points = k**d
+        self.points = self.U @ grid
+
+    def set_weights(self, weights):
+        self.weights = np.array(weights)
 
     def periodic_delaunay(self):
         if not hasattr(self, 'points'):
@@ -424,3 +436,112 @@ class Periodica:
         if show:
             plt.show()
         plt.savefig('delaunay.svg')
+
+    def plot_voronoi(self, show=True, animation_gif=None):
+        if not hasattr(self, 'points'):
+            raise Exception('No input points')
+        if not hasattr(self, 'V'):
+            self.V = _periodica.reduced_basis(self.U)
+            
+        fig = plt.figure()
+        ax = fig.add_subplot()
+
+        if not hasattr(self, 'weights'):
+            self.weights = np.zeros(self.n)
+        
+        voronoi_points, voronoi_edges = _periodica.full_voronoi(self.U, self.points, self.weights)
+
+        print(voronoi_points)
+        print(voronoi_edges)
+
+        ax.scatter(*voronoi_points, color='r')
+        for s, t in voronoi_edges:
+            print(s,t)
+            ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
+
+        A, b =  _periodica.dirichlet_domain(self.V)
+        canonical_points = _periodica.canonical_points(A, b, self.points)
+        P, I, S = _periodica.points_in_3x_domain(self.V, A, b, canonical_points)
+        if hasattr(self, 'weights'):
+            weights = np.asarray(self.weights, dtype=float).reshape(-1)
+            if weights.shape[0] != self.points.shape[1]:
+                raise Exception('weights length must equal number of points')
+            working_weights = weights[I]
+            delaunay_edges = _periodica.weighted_delaunay_skeleton(P, working_weights)
+        else:
+            delaunay_edges = _periodica.delaunay_skeleton(P)
+
+
+
+        if self.d == 2:
+            # ax = fig.add_subplot()
+
+            # self.draw_unit_cell(self.V[:,:-1], ax, green)
+            ax.arrow(0, 0, self.V[0,0], self.V[1,0], color=green, width=0.01, head_width=0.04)
+            ax.arrow(0, 0, self.V[1,0], self.V[1,1], color=green, width=0.01, head_width=0.04)
+
+            self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='-', fill_color='b')
+            self.draw_polytope(A, b * 3, ax, lw=0.75, ls='-', alpha=1)
+
+            ax.scatter(*P[:,self.n:], color='k', s=5, zorder=1)
+            ax.scatter(*canonical_points, color='k', s=5)
+            
+            shift_set = set()
+            for s, t in delaunay_edges:
+                arc = False
+                if s < self.n or t < self.n:
+                    arc = True
+                    if s > t:
+                        s, t = t, s
+                    if t >= self.n and s > I[t]:
+                        arc = False
+                    if s == I[t]:
+                        shift_key = str(s) + str(S[:,t])
+                        opposite_key = str(s) + str(-S[:,t])
+                        if opposite_key in shift_set:
+                            arc = False
+                        else:
+                            shift_set.add(shift_key)
+                color = '#0000FE' if arc else 'k'
+                alpha = 0.8 if arc else 0.2
+                lw = 1.5 if arc else 1
+                ax.plot(*P[:,(s,t)], '--', lw=lw, color=color, alpha=alpha, zorder=0)
+
+            ax.set_aspect(1)
+        
+        else:
+            ax = fig.add_subplot(projection='3d')
+
+            self.draw_polytope(A, b * 3, ax, lw=1, ls='-', alpha=0.5)
+
+            ax.scatter(*P[:,self.n:], color=blue, s=5)
+            ax.scatter(*canonical_points, color=red, s=5)
+
+            for s, t in delaunay_edges:
+                arc = False
+                if s < self.n or t < self.n:
+                    arc = True
+                    if s > t:
+                        s, t = t, s
+                    if t >= self.n and s > I[t]:
+                        arc = False
+                if not arc:
+                    continue
+                color = red if arc else blue
+                alpha = 0.5 if arc else 0.2
+                ax.plot(*P[:,(s,t)], lw=1, color=color, alpha=alpha)
+            
+            limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
+            ax.set_box_aspect(np.ptp(limits, axis = 1))
+        
+            if animation_gif:
+                gif = animation.FuncAnimation(fig, lambda x: ax.view_init(azim=x), frames=np.arange(0, 362, 2), interval=100)
+                gif.save(animation_gif, dpi=80, writer='imagemagick')
+        
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        plt.get_current_fig_manager().set_window_title('')
+        if show:
+            plt.show()
+        # plt.savefig('delaunay.svg')
