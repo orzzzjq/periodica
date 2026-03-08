@@ -109,7 +109,7 @@ Gudhi::Simplex_tree<> DelaunayComplex(
             w.push_back(weights(i));
         }
         Gudhi::alpha_complex::Alpha_complex<K2, true> alphaComplex(p, w);
-        alphaComplex.create_complex(complex, INFINITY, false, true);
+        alphaComplex.create_complex(complex, INFINITY, false, false);
     }
     else {
         vector<double> coord(3);
@@ -125,7 +125,7 @@ Gudhi::Simplex_tree<> DelaunayComplex(
             w.push_back(weights(i));
         }
         Gudhi::alpha_complex::Alpha_complex<K3, true> alphaComplex(p, w);
-        alphaComplex.create_complex(complex, INFINITY, false, true);
+        alphaComplex.create_complex(complex, INFINITY, false, false);
     }
 
     return complex;
@@ -680,6 +680,16 @@ Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {
     return result;
 }
 
+struct simplexVertex {
+    vector<double> p;
+    int id;
+    bool operator<(const simplexVertex& other) const {
+        if (p[0] != other.p[0]) return p[0] < other.p[0];
+        if (p[1] != other.p[1]) return p[1] < other.p[1];
+        return p[2] < other.p[2];
+    }
+};
+
 // Compute the periodic Voronoi complex
 // Output:
 //  Voronoi points: MatrixXd(d, l)
@@ -687,10 +697,11 @@ Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {
 //  Point filtration values
 //  Edge filtration values
 //  Edge (arc) shift vectors
-std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> periodicVoronoi(
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> periodicVoronoi(
     const Eigen::MatrixXd& U,       // lattice basis
     const Eigen::MatrixXd& points,  // points in unit cell
-    const Eigen::VectorXd& weights  // weights of points in unit cell
+    const Eigen::VectorXd& weights, // weights of points in unit cell
+    bool useCircumCenter
 ) {
     if (U.cols() != U.rows() || U.rows() != points.rows()) {
         throw std::invalid_argument("Invalid input");
@@ -722,8 +733,10 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> periodicVoronoi(
     // Get d-dimensional simplices
     unordered_map<int64_t, int> simplex_id_map;
     vector<vector<int>> simplex_vertices;
+    vector<Eigen::VectorXi> simplex_shifts;
     vector<Eigen::VectorXd> voronoi_points;
-    vector<bool> simplex_in_1x_domain;
+    vector<double> v_point_filtrations;
+    vector<bool> canonical_simplex;
     
     auto simplexKey = [](const vector<int>& vertices) {
         int64_t key = 0;
@@ -738,12 +751,27 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> periodicVoronoi(
         if (delaunay_complex.dimension(simplex) != d) continue;
 
         vector<int> vertices;
-        bool in_1x_domain = false;
+        vector<simplexVertex> s_vertices;
         for (auto v : delaunay_complex.simplex_vertex_range(simplex)) {
             int vi = static_cast<int>(v);
             vertices.push_back(vi);
-            if (vi < n) in_1x_domain = true;
+            vector<double> p;
+            for (int i = 0; i < d; ++i) {
+                p.push_back(working_points(i, vi));
+            }
+            s_vertices.push_back(simplexVertex(p, vi));
         }
+
+        simplexVertex s_repr = s_vertices[0];
+        for (int i = 1; i < s_vertices.size(); ++i) {
+            if (s_vertices[i] < s_repr) {
+                s_repr = s_vertices[i];
+            }
+        }
+
+        int s_repr_id = s_repr.id;
+        canonical_simplex.push_back(s_repr_id < n);
+        simplex_shifts.push_back(S.col(s_repr_id));
 
         sort(vertices.begin(), vertices.end());
         Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
@@ -765,11 +793,13 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> periodicVoronoi(
         simplex_id_map.emplace(simplexKey(vertices), id);
         simplex_vertices.push_back(std::move(vertices));
         voronoi_points.push_back(std::move(center));
-        simplex_in_1x_domain.push_back(in_1x_domain);
+        v_point_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+        printf("%f\n", delaunay_complex.filtration(simplex));
     }
 
     // Voronoi edges connect adjacent d-simplices that share a (d-1)-face.
     vector<pair<int,int>> voronoi_edges;
+    vector<double> v_edge_filtrations;
     for (auto simplex : delaunay_complex.skeleton_simplex_range(d-1)) {
         if (delaunay_complex.dimension(simplex) != d-1) continue;
 
@@ -787,29 +817,55 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> periodicVoronoi(
         if (cofaces.size() == 2) {
             // The simplex has two cofaces
             voronoi_edges.push_back({cofaces[0], cofaces[1]});
+            v_edge_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+        }
+    }
+
+    vector<int> canonical_v_points;
+    vector<double> _p_filtrations;
+    for (int i = 0; i < canonical_simplex.size(); ++i) {
+        if (canonical_simplex[i]) {
+            canonical_v_points.push_back(i);
+            _p_filtrations.push_back(v_point_filtrations[i]);
+        }
+    }
+
+    vector<pair<int,int>> periodic_v_edges;
+    vector<double> _e_filtrations;
+    for (int i = 0; i < voronoi_edges.size(); ++i) {
+        auto [s,t] = voronoi_edges[i];
+        if (canonical_simplex[s] || canonical_simplex[t]) {
+            if (canonical_simplex[t] && !canonical_simplex[s]) {
+                swap(s, t);
+            }
+            periodic_v_edges.push_back({s,t});
+            _e_filtrations.push_back(v_edge_filtrations[i]);
         }
     }
 
     // Get the results
-    int L = size(voronoi_points);
-    int M = size(voronoi_edges);
+    int L = size(canonical_v_points);
+    int M = size(periodic_v_edges);
     Eigen::MatrixXd v_points(d, L);
     Eigen::MatrixXi v_edges(M, 2);
-    // Eigen::VectorXd filtration(M);
+    Eigen::VectorXd p_filtrations(L);
+    Eigen::VectorXd e_filtrations(M);
     // Eigen::MatrixXi shift(d, M);
 
     for (int i = 0; i < L; ++i) {
-        v_points.col(i) = voronoi_points[i];
+        v_points.col(i) = voronoi_points[canonical_v_points[i]];
+        p_filtrations(i) = _p_filtrations[i];
     }
 
     for (int i = 0; i < M; ++i) {
         // Voronoi edge between dual points of d-simplices.
-        auto [s, t] = voronoi_edges[i];
+        auto [s, t] = periodic_v_edges[i];
         v_edges(i, 0) = s;
         v_edges(i, 1) = t;
+        e_filtrations(i) = _e_filtrations[i];
     }
 
-    return {v_points, v_edges};
+    return {v_points, v_edges, p_filtrations, e_filtrations};
 }
 
 

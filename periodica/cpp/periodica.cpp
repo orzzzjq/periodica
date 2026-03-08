@@ -34,6 +34,9 @@ PYBIND11_MODULE(_periodica, m) {
    m.def("periodic_delaunay", &DELAUNAY::periodicDelaunay, 
         "Compute quotient complex from periodic Delaunay complex",
         py::arg("U"), py::arg("points"), py::arg("weights"));
+   m.def("periodic_voronoi", &DELAUNAY::periodicVoronoi, 
+        "Compute quotient complex from periodic Voronoi complex",
+        py::arg("U"), py::arg("points"), py::arg("weights"), py::arg("useCircumCenter") = false);
    m.def("full_voronoi", &DELAUNAY::fullVoronoiSkeleton, 
         "Compute the dual complex of the Delaunay of the points in the 3X Dirichlet domain",
         py::arg("U"), py::arg("points"), py::arg("weights"), py::arg("useCircumCenter") = false);

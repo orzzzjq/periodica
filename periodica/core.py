@@ -436,6 +436,12 @@ class Periodica:
         voronoi_points, voronoi_edges = _periodica.full_voronoi(
             self.U, self.points, self.weights, use_circumcenter
         )
+        canonical_voronoi_points, periodic_voronoi_edges, point_filtrations, edge_filtrations = _periodica.periodic_voronoi(
+            self.U, self.points, self.weights, use_circumcenter
+        )
+
+        print(point_filtrations)
+        print(edge_filtrations)
 
         if self.d == 2:
             if not ax:
@@ -448,13 +454,16 @@ class Periodica:
             self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='-', fill_color='b')
             self.draw_polytope(A, b * 3, ax, lw=0.75, ls='-', alpha=1)
             
-            self.plot_delaunay(ax=ax, show=False)
+            # self.plot_delaunay(ax=ax, show=False)
 
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xy'])
 
-            # ax.scatter(*voronoi_points, color='r')
+            ax.scatter(*canonical_voronoi_points, color='r')
             for s, t in voronoi_edges:
-                ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
+                ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='k', zorder=1)
+            
+            for s, t in periodic_voronoi_edges:
+                ax.plot(*voronoi_points[:,(s,t)], lw=1.5, color='r', zorder=2)
 
             ax.set_xlim(limits[0])
             ax.set_ylim(limits[1])
