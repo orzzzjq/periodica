@@ -35,13 +35,13 @@ def run_2d_delaunay_example():
     
 def run_2d_voronoi_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=1, d=2, seed=0)
+    periodica.generate_random_points(n=3, d=2, seed=0)
     periodica.plot_voronoi(show=True, use_circumcenter=True)
     # periodica.print_merge_tree()
     
 def run_3d_voronoi_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=1, d=3, seed=1)
+    periodica.generate_random_points(n=1, d=3, seed=2)
     periodica.plot_voronoi(show=True, use_circumcenter=True)
     # periodica.print_merge_tree()
 

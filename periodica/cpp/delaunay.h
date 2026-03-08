@@ -69,7 +69,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullDelaunaySkeleton(
     const Eigen::MatrixXd& points,  // points in unit cell
     const Eigen::VectorXd& weights);
     
-std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> periodicVoronoi(
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, Eigen::MatrixXi> periodicVoronoi(
     const Eigen::MatrixXd& U,       // lattice basis
     const Eigen::MatrixXd& points,  // points in unit cell
     const Eigen::VectorXd& weights, // weights of points in unit cell

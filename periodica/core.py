@@ -436,12 +436,13 @@ class Periodica:
         voronoi_points, voronoi_edges = _periodica.full_voronoi(
             self.U, self.points, self.weights, use_circumcenter
         )
-        canonical_voronoi_points, periodic_voronoi_edges, point_filtrations, edge_filtrations = _periodica.periodic_voronoi(
+        canonical_voronoi_points, periodic_voronoi_edges, point_filtrations, edge_filtrations, shift_vectors = _periodica.periodic_voronoi(
             self.U, self.points, self.weights, use_circumcenter
         )
 
         print(point_filtrations)
         print(edge_filtrations)
+        print(shift_vectors)
 
         if self.d == 2:
             if not ax:
@@ -454,7 +455,7 @@ class Periodica:
             self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='-', fill_color='b')
             self.draw_polytope(A, b * 3, ax, lw=0.75, ls='-', alpha=1)
             
-            # self.plot_delaunay(ax=ax, show=False)
+            self.plot_delaunay(ax=ax, show=False)
 
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xy'])
 
@@ -462,8 +463,11 @@ class Periodica:
             for s, t in voronoi_edges:
                 ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='k', zorder=1)
             
-            for s, t in periodic_voronoi_edges:
-                ax.plot(*voronoi_points[:,(s,t)], lw=1.5, color='r', zorder=2)
+            for i in range(periodic_voronoi_edges.shape[0]):
+                s, t = periodic_voronoi_edges[i]
+                sP = canonical_voronoi_points[:,s]
+                tP = canonical_voronoi_points[:,t] + self.V[:,:-1] @ shift_vectors[:,i]
+                ax.plot([sP[0], tP[0]], [sP[1], tP[1]], lw=1.5, color='r', zorder=2)
 
             ax.set_xlim(limits[0])
             ax.set_ylim(limits[1])
@@ -480,8 +484,14 @@ class Periodica:
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
 
             # ax.scatter(*voronoi_points, color='r')
-            for s, t in voronoi_edges:
+            for s, t in periodic_voronoi_edges:
                 ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
+                
+            for i in range(periodic_voronoi_edges.shape[0]):
+                s, t = periodic_voronoi_edges[i]
+                sP = canonical_voronoi_points[:,s]
+                tP = canonical_voronoi_points[:,t] + self.V[:,:-1] @ shift_vectors[:,i]
+                ax.plot([sP[0], tP[0]], [sP[1], tP[1]], [sP[2], tP[2]], lw=1.5, color='r', zorder=2)
 
             ax.set_xlim(limits[0])
             ax.set_ylim(limits[1])

@@ -697,7 +697,7 @@ struct simplexVertex {
 //  Point filtration values
 //  Edge filtration values
 //  Edge (arc) shift vectors
-std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> periodicVoronoi(
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, Eigen::MatrixXi> periodicVoronoi(
     const Eigen::MatrixXd& U,       // lattice basis
     const Eigen::MatrixXd& points,  // points in unit cell
     const Eigen::VectorXd& weights, // weights of points in unit cell
@@ -731,18 +731,32 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
     Gudhi::Simplex_tree<> delaunay_complex = DelaunayComplex(working_points, working_weights);
 
     // Get d-dimensional simplices
-    unordered_map<int64_t, int> simplex_id_map;
+    unordered_map<string, int> simplex_id_map;
     vector<vector<int>> simplex_vertices;
     vector<Eigen::VectorXi> simplex_shifts;
     vector<Eigen::VectorXd> voronoi_points;
     vector<double> v_point_filtrations;
     vector<bool> canonical_simplex;
     
-    auto simplexKey = [](const vector<int>& vertices) {
-        int64_t key = 0;
-        for (size_t i = 0; i < vertices.size(); ++i) {
-            key |= vertices[i];
-            key <<= 20;
+    auto simplexKey = [](const vector<int>& indices, const vector<Eigen::VectorXi>& shifts, int d) {
+        vector<vector<int>> verts;
+        for (int i = 0; i < indices.size(); ++i) {
+            vector<int> vi;
+            vi.push_back(indices[i]);
+            for (int j = 0; j < d; ++j) {
+                vi.push_back(shifts[i](j));
+            }
+            verts.push_back(vi);
+        }
+        // Lexicographic order, e.g. [[0,0],[0,1],[-1,1]] -> [[-1,1],[0,0],[0,1]]
+        sort(verts.begin(), verts.end());
+        string key;
+        for (const auto& v : verts) {
+            for (size_t j = 0; j < v.size(); ++j) {
+                if (j) key += ",";
+                key += to_string(v[j]);
+            }
+            key += ";";
         }
         return key;
     };
@@ -790,11 +804,16 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
         }
 
         int id = static_cast<int>(simplex_vertices.size());
-        simplex_id_map.emplace(simplexKey(vertices), id);
+        vector<int> _indices;
+        vector<Eigen::VectorXi> _shifts;
+        for (auto vi : vertices) {
+            _indices.push_back(I(vi));
+            _shifts.push_back(S.col(vi));
+        }
+        simplex_id_map.emplace(simplexKey(_indices, _shifts, d), id);
         simplex_vertices.push_back(std::move(vertices));
         voronoi_points.push_back(std::move(center));
         v_point_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
-        printf("%f\n", delaunay_complex.filtration(simplex));
     }
 
     // Voronoi edges connect adjacent d-simplices that share a (d-1)-face.
@@ -810,8 +829,13 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
             for (auto v : delaunay_complex.simplex_vertex_range(coface)) {
                 verts.push_back(static_cast<int>(v));
             }
-            sort(verts.begin(), verts.end());
-            cofaces.push_back(simplex_id_map[simplexKey(verts)]);
+            vector<int> _indices;
+            vector<Eigen::VectorXi> _shifts;
+            for (auto vi : verts) {
+                _indices.push_back(I(vi));
+                _shifts.push_back(S.col(vi));
+            }
+            cofaces.push_back(simplex_id_map[simplexKey(_indices, _shifts, d)]);
         }
 
         if (cofaces.size() == 2) {
@@ -821,12 +845,34 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
         }
     }
 
+    vector<int> v_I(canonical_simplex.size()); // the canonical index of the simplex
+    map<int, int> canonical_id;
     vector<int> canonical_v_points;
     vector<double> _p_filtrations;
     for (int i = 0; i < canonical_simplex.size(); ++i) {
         if (canonical_simplex[i]) {
+            canonical_id[i] = canonical_v_points.size();
             canonical_v_points.push_back(i);
             _p_filtrations.push_back(v_point_filtrations[i]);
+        }
+        auto verts = simplex_vertices[i];
+        vector<int> _indices;
+        vector<Eigen::VectorXi> _shifts;
+        for (auto vi : verts) {
+            _indices.push_back(I(vi));
+            _shifts.push_back(S.col(vi) - simplex_shifts[i]);
+        }
+        auto key = simplexKey(_indices, _shifts, d);
+        if (simplex_id_map.find(key) != simplex_id_map.end()) {
+            v_I[i] = simplex_id_map[simplexKey(_indices, _shifts, d)];
+        } else {
+            v_I[i] = -1;
+        }
+    }
+
+    for (int i = 0; i < canonical_simplex.size(); ++i) {
+        if (v_I[i] != -1) {
+            v_I[i] = canonical_id[v_I[i]];
         }
     }
 
@@ -838,6 +884,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
             if (canonical_simplex[t] && !canonical_simplex[s]) {
                 swap(s, t);
             }
+            if (!canonical_simplex[t] && v_I[s] > v_I[t]) continue;
             periodic_v_edges.push_back({s,t});
             _e_filtrations.push_back(v_edge_filtrations[i]);
         }
@@ -850,7 +897,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
     Eigen::MatrixXi v_edges(M, 2);
     Eigen::VectorXd p_filtrations(L);
     Eigen::VectorXd e_filtrations(M);
-    // Eigen::MatrixXi shift(d, M);
+    Eigen::MatrixXi e_shift(d, M);
 
     for (int i = 0; i < L; ++i) {
         v_points.col(i) = voronoi_points[canonical_v_points[i]];
@@ -860,12 +907,13 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd> p
     for (int i = 0; i < M; ++i) {
         // Voronoi edge between dual points of d-simplices.
         auto [s, t] = periodic_v_edges[i];
-        v_edges(i, 0) = s;
-        v_edges(i, 1) = t;
+        v_edges(i, 0) = v_I[s];
+        v_edges(i, 1) = v_I[t];
         e_filtrations(i) = _e_filtrations[i];
+        e_shift.col(i) = simplex_shifts[t];
     }
 
-    return {v_points, v_edges, p_filtrations, e_filtrations};
+    return {v_points, v_edges, p_filtrations, e_filtrations, e_shift};
 }
 
 
