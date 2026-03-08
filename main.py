@@ -26,7 +26,7 @@ def run_3d_quotient_example():
 
 def run_2d_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=2, d=2, seed=2)
+    periodica.generate_random_points(n=4, d=2, seed=3)
     periodica.plot_delaunay(show=True)
     periodica.print_merge_tree()
     # periodica.plot_barcodes(show=False)
@@ -35,14 +35,14 @@ def run_2d_delaunay_example():
     
 def run_2d_voronoi_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=5, d=2, seed=0)
+    periodica.generate_random_points(n=1, d=2, seed=0)
     periodica.plot_voronoi(show=True, use_circumcenter=True)
     # periodica.print_merge_tree()
     
 def run_3d_voronoi_example():
     periodica = Periodica()
     periodica.generate_random_points(n=1, d=3, seed=1)
-    periodica.plot_voronoi(show=True)
+    periodica.plot_voronoi(show=True, use_circumcenter=True)
     # periodica.print_merge_tree()
 
 def run_2d_grid_example():

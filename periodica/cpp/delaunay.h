@@ -64,4 +64,8 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
     const Eigen::VectorXd& weights,
     bool useCircumCenter = false);
 
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullDelaunaySkeleton(
+    const Eigen::MatrixXd& U,       // lattice basis
+    const Eigen::MatrixXd& points,  // points in unit cell
+    const Eigen::VectorXd& weights);
 }

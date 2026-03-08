@@ -680,6 +680,139 @@ Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {
     return result;
 }
 
+// Compute the periodic Voronoi complex
+// Output:
+//  Voronoi points: MatrixXd(d, l)
+//  Voronoi edges: MatrixXi(m, 2)
+//  Point filtration values
+//  Edge filtration values
+//  Edge (arc) shift vectors
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> periodicVoronoi(
+    const Eigen::MatrixXd& U,       // lattice basis
+    const Eigen::MatrixXd& points,  // points in unit cell
+    const Eigen::VectorXd& weights  // weights of points in unit cell
+) {
+    if (U.cols() != U.rows() || U.rows() != points.rows()) {
+        throw std::invalid_argument("Invalid input");
+    }
+    if (weights.size() != points.cols()) {
+        throw std::invalid_argument("weights size must be equal to the number of points");
+    }
+
+    int d = points.rows(), n = points.cols();
+    
+    // Reduced basis
+    auto V = reducedBasis(U);
+    
+    // Dirichlet domain
+    auto [A, b] = DirichletDomain(V);
+
+    // Canonical points in the Dirichlet domain
+    auto canonical_points = canonicalPoints(A, b, points);
+
+    // Points in the 3x Dirichlet domain, together with original index and shift vectors
+    auto [working_points, I, S] = pointsIn3xDomain(V, A, b, canonical_points);
+    Eigen::VectorXd working_weights(working_points.cols());
+    for (int i = 0; i < working_points.cols(); ++i) {
+        working_weights(i) = weights(I(i));
+    }
+
+    Gudhi::Simplex_tree<> delaunay_complex = DelaunayComplex(working_points, working_weights);
+
+    // Get d-dimensional simplices
+    unordered_map<int64_t, int> simplex_id_map;
+    vector<vector<int>> simplex_vertices;
+    vector<Eigen::VectorXd> voronoi_points;
+    vector<bool> simplex_in_1x_domain;
+    
+    auto simplexKey = [](const vector<int>& vertices) {
+        int64_t key = 0;
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            key |= vertices[i];
+            key <<= 20;
+        }
+        return key;
+    };
+
+    for (auto simplex : delaunay_complex.skeleton_simplex_range(d)) {
+        if (delaunay_complex.dimension(simplex) != d) continue;
+
+        vector<int> vertices;
+        bool in_1x_domain = false;
+        for (auto v : delaunay_complex.simplex_vertex_range(simplex)) {
+            int vi = static_cast<int>(v);
+            vertices.push_back(vi);
+            if (vi < n) in_1x_domain = true;
+        }
+
+        sort(vertices.begin(), vertices.end());
+        Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
+        if (useCircumCenter) {
+            vector<Eigen::VectorXd> simplex_points;
+            simplex_points.reserve(vertices.size());
+            for (int vi : vertices) {
+                simplex_points.push_back(working_points.col(vi));
+            }
+            center = circumCenter(simplex_points);
+        } else {
+            for (int vi : vertices) {
+                center += working_points.col(vi);
+            }
+            center /= static_cast<double>(vertices.size());
+        }
+
+        int id = static_cast<int>(simplex_vertices.size());
+        simplex_id_map.emplace(simplexKey(vertices), id);
+        simplex_vertices.push_back(std::move(vertices));
+        voronoi_points.push_back(std::move(center));
+        simplex_in_1x_domain.push_back(in_1x_domain);
+    }
+
+    // Voronoi edges connect adjacent d-simplices that share a (d-1)-face.
+    vector<pair<int,int>> voronoi_edges;
+    for (auto simplex : delaunay_complex.skeleton_simplex_range(d-1)) {
+        if (delaunay_complex.dimension(simplex) != d-1) continue;
+
+        vector<int> cofaces;
+        for (auto coface : delaunay_complex.cofaces_simplex_range(simplex, 1)) {
+            // coface is a d-simplex handle
+            std::vector<int> verts;
+            for (auto v : delaunay_complex.simplex_vertex_range(coface)) {
+                verts.push_back(static_cast<int>(v));
+            }
+            sort(verts.begin(), verts.end());
+            cofaces.push_back(simplex_id_map[simplexKey(verts)]);
+        }
+
+        if (cofaces.size() == 2) {
+            // The simplex has two cofaces
+            voronoi_edges.push_back({cofaces[0], cofaces[1]});
+        }
+    }
+
+    // Get the results
+    int L = size(voronoi_points);
+    int M = size(voronoi_edges);
+    Eigen::MatrixXd v_points(d, L);
+    Eigen::MatrixXi v_edges(M, 2);
+    // Eigen::VectorXd filtration(M);
+    // Eigen::MatrixXi shift(d, M);
+
+    for (int i = 0; i < L; ++i) {
+        v_points.col(i) = voronoi_points[i];
+    }
+
+    for (int i = 0; i < M; ++i) {
+        // Voronoi edge between dual points of d-simplices.
+        auto [s, t] = voronoi_edges[i];
+        v_edges(i, 0) = s;
+        v_edges(i, 1) = t;
+    }
+
+    return {v_points, v_edges};
+}
+
+
 // Compute the Voronoi 1-skeleton of the points in 3x Direchlet region
 // Output:
 //  Voronoi points: MatrixXd(d, l)
@@ -790,35 +923,6 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
         }
     }
 
-    // unordered_map<string, vector<int>> face_to_simplices;
-    // for (int sid = 0; sid < simplex_vertices.size(); ++sid) {
-    //     const auto& vertices = simplex_vertices[sid];
-    //     for (int drop = 0; drop < vertices.size(); ++drop) {
-    //         vector<int> face;
-    //         face.reserve(vertices.size() - 1);
-    //         for (int i = 0; i < vertices.size(); ++i) {
-    //             if (i != drop) face.push_back(vertices[i]);
-    //         }
-    //         face_to_simplices[simplexKey(face)].push_back(sid);
-    //     }
-    // }
-
-    // vector<pair<int, int>> quotient_edges;
-    // unordered_set<string> edge_set;
-    // for (const auto& [_, simplex_ids] : face_to_simplices) {
-    //     for (int i = 0; i < static_cast<int>(simplex_ids.size()); ++i) {
-    //         for (int j = i + 1; j < static_cast<int>(simplex_ids.size()); ++j) {
-    //             int s = simplex_ids[i], t = simplex_ids[j];
-    //             if (s > t) swap(s, t);
-    //             if (!simplex_in_1x_domain[s] && !simplex_in_1x_domain[t]) continue;
-    //             string edge_key = to_string(s) + "," + to_string(t);
-    //             if (edge_set.insert(edge_key).second) {
-    //                 quotient_edges.push_back({s, t});
-    //             }
-    //         }
-    //     }
-    // }
-
     // Get the results
     int L = size(voronoi_points);
     int M = size(voronoi_edges);
@@ -836,15 +940,71 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
         auto [s, t] = voronoi_edges[i];
         v_edges(i, 0) = s;
         v_edges(i, 1) = t;
-        
-        // filtration value
-        // filtration(i) = (simplex_points[s] - simplex_points[t]).norm();
-
-        // TODO: infer quotient shift from simplex representatives.
-        // shift.col(i).setZero();
     }
 
     return {v_points, v_edges};
+}
+
+
+// Compute the Delaunay 1-skeleton of the points in 3x Direchlet region
+// Output:
+//  Delaunay points: MatrixXd(d, l)
+//  Delaunay edges: MatrixXi(m, 2)
+//  **todo Filtration values: VectorXd(m)
+//  **todo Shift vectors: MatrixXi(d, m)
+std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullDelaunaySkeleton(
+    const Eigen::MatrixXd& U,       // lattice basis
+    const Eigen::MatrixXd& points,  // points in unit cell
+    const Eigen::VectorXd& weights  // weights of points in unit cell
+) {
+    if (U.cols() != U.rows() || U.rows() != points.rows()) {
+        throw std::invalid_argument("Invalid input");
+    }
+    if (weights.size() != points.cols()) {
+        throw std::invalid_argument("weights size must be equal to the number of points");
+    }
+
+    int d = points.rows(), n = points.cols();
+    
+    // Reduced basis
+    auto V = reducedBasis(U);
+    
+    // Dirichlet domain
+    auto [A, b] = DirichletDomain(V);
+
+    // Canonical points in the Dirichlet domain
+    auto canonical_points = canonicalPoints(A, b, points);
+
+    // Points in the 3x Dirichlet domain, together with original index and shift vectors
+    auto [working_points, I, S] = pointsIn3xDomain(V, A, b, canonical_points);
+    Eigen::VectorXd working_weights(working_points.cols());
+    for (int i = 0; i < working_points.cols(); ++i) {
+        working_weights(i) = weights(I(i));
+    }
+
+    Gudhi::Simplex_tree<> delaunay_complex = DelaunayComplex(working_points, working_weights);
+
+    // Delaunay edges
+    vector<pair<int,int>> delaunay_edges;
+    for (auto simplex : delaunay_complex.skeleton_simplex_range(1)) {
+        if (delaunay_complex.dimension(simplex)) {
+            vector<int> id;
+            for (auto v : delaunay_complex.simplex_vertex_range(simplex)) {
+                id.push_back(int(v));
+            }
+            delaunay_edges.push_back({id[0], id[1]});
+        }
+    }
+
+    Eigen::MatrixXi del_edges(size(delaunay_edges), 2);
+
+    for (size_t i = 0; i < size(delaunay_edges); ++i) {
+        auto [s, t] = delaunay_edges[i];
+        del_edges(i, 0) = s;
+        del_edges(i, 1) = t;
+    }
+
+    return {working_points, del_edges};
 }
 
 } // End of namespace DELAUNAY
