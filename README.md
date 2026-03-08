@@ -1,4 +1,6 @@
-# Periodica
+<p align="center">
+<img src="logo.png" width=300px></img>
+</p>
 
 Periodica is a
 C++ based Python library for analyzing the topological structures
