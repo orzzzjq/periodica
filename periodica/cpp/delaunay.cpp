@@ -570,13 +570,28 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
     }
 
     // Weighted Delaunay complex from points in the 3x domain
-    auto delaunay_edges = DelaunaySkeleton(working_points, working_weights);
+    Gudhi::Simplex_tree<> complex = DelaunayComplex(working_points, working_weights);
+
+    vector<vector<int>> delaunay_edges;
+    vector<double> e_filtrations;
+
+    for (auto simplex : complex.skeleton_simplex_range(1)) {
+        if (complex.dimension(simplex)) {
+            vector<int> id;
+            for (auto v : complex.simplex_vertex_range(simplex)) {
+                id.push_back(int(v));
+            }
+            delaunay_edges.push_back(id);
+            e_filtrations.push_back(sqrt(complex.filtration(simplex)));
+        }
+    }
 
     // Filter the periodic edges (have at least one end point in the 1x domain
     vector<pair<int,int>> quotient_edges;
+    vector<double> quotient_filtrations;
     unordered_set<string> shift_set;
-    for (int i = 0; i < delaunay_edges.rows(); ++i) {
-        int s = delaunay_edges(i, 0), t = delaunay_edges(i, 1);
+    for (int i = 0; i < delaunay_edges.size(); ++i) {
+        int s = delaunay_edges[i][0], t = delaunay_edges[i][1];
         if (s < n || t < n) {
             if (s > t) swap(s, t); // let the first point be the one with smaller index
             if (t >= n && s > I(t)) continue;
@@ -598,6 +613,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
                 shift_set.insert(shift_key);
             }
             quotient_edges.push_back({s, t});
+            quotient_filtrations.push_back(e_filtrations[i]);
         }
     }
 
@@ -614,16 +630,16 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
         edges(i, 1) = I(t);
         
         // filtration value
-        double sq_dist = 0;
-        if (d == 2) {
-            double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t);
-            sq_dist = dx * dx + dy * dy;
-        }
-        else {
-            double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t), dz = working_points(2, s) - working_points(2, t);
-            sq_dist = dx * dx + dy * dy + dz * dz;
-        }
-        filtration(i) = sqrt(sq_dist);
+        // double sq_dist = 0;
+        // if (d == 2) {
+        //     double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t);
+        //     sq_dist = dx * dx + dy * dy;
+        // }
+        // else {
+        //     double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t), dz = working_points(2, s) - working_points(2, t);
+        //     sq_dist = dx * dx + dy * dy + dz * dz;
+        // }
+        filtration(i) = quotient_filtrations[i];
 
         // shift vector
         shift.col(i) = S.col(t);
@@ -849,6 +865,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
     map<int, int> canonical_id;
     vector<int> canonical_v_points;
     vector<double> _p_filtrations;
+    // printf("v_I: ");
     for (int i = 0; i < canonical_simplex.size(); ++i) {
         if (canonical_simplex[i]) {
             canonical_id[i] = canonical_v_points.size();
@@ -868,7 +885,15 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         } else {
             v_I[i] = -1;
         }
+        // printf("%d ", v_I[i]);
     }
+    // printf("\n");
+
+    // printf("canonical v points: ");
+    // for (auto id : canonical_v_points) {
+    //     printf("%d, ", id);
+    // }
+    // printf("\n");
 
     for (int i = 0; i < canonical_simplex.size(); ++i) {
         if (v_I[i] != -1) {
@@ -884,7 +909,8 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
             if (canonical_simplex[t] && !canonical_simplex[s]) {
                 swap(s, t);
             }
-            if (!canonical_simplex[t] && v_I[s] > v_I[t]) continue;
+            // if (!canonical_simplex[t] && v_I[s] > v_I[t]) continue;
+            if (v_I[s] == -1 || v_I[t] == -1) continue;
             periodic_v_edges.push_back({s,t});
             _e_filtrations.push_back(v_edge_filtrations[i]);
         }
@@ -901,7 +927,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
 
     for (int i = 0; i < L; ++i) {
         v_points.col(i) = voronoi_points[canonical_v_points[i]];
-        p_filtrations(i) = _p_filtrations[i];
+        p_filtrations(i) = _p_filtrations[canonical_v_points[i]];
     }
 
     for (int i = 0; i < M; ++i) {
@@ -909,6 +935,8 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         auto [s, t] = periodic_v_edges[i];
         v_edges(i, 0) = v_I[s];
         v_edges(i, 1) = v_I[t];
+        // v_edges(i, 0) = s;
+        // v_edges(i, 1) = t;
         e_filtrations(i) = _e_filtrations[i];
         e_shift.col(i) = simplex_shifts[t];
     }

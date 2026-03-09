@@ -7,6 +7,7 @@ except ImportError:
 import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial import ConvexHull
 import matplotlib.animation as animation
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -37,6 +38,8 @@ class Periodica:
         self.d = d      # dimension
         self.U = np.random.rand(d, d) * 2 - 1       # original basis
         self.points = self.U @ np.random.rand(d, n) # points in unit cell
+        # self.U = np.identity(d) * 2
+        # self.points = self.U @ np.ndarray((d, n)) # points in unit cell
 
     def generate_grid_points(self, d, k, seed=4):
         np.random.seed(seed)
@@ -325,7 +328,15 @@ class Periodica:
             for simplex in hull.simplices:
                 ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], domain_vertices[simplex, 2], color=color, lw=lw, ls=ls, alpha=alpha)
                 ax.plot(domain_vertices[[simplex[-1], simplex[0]], 0], domain_vertices[[simplex[-1], simplex[0]], 1], domain_vertices[[simplex[-1], simplex[0]], 2], color=color, lw=lw, ls=ls, alpha=alpha)
-                ax.plot_trisurf(*domain_vertices[simplex].T, linewidth=0, color=color, antialiased=True, alpha=0.1)
+                ax.add_collection3d(
+                    Poly3DCollection(
+                        [domain_vertices[simplex]],
+                        linewidths=0,
+                        facecolors=color,
+                        edgecolors='none',
+                        alpha=0.1,
+                    )
+                )
 
     def draw_unit_cell(self, basis, ax, color=green):
         cell_vertices = []
@@ -370,6 +381,7 @@ class Periodica:
             self.draw_polytope(A, b, ax, lw=1, alpha=1, ls='-', fill_color='b')
             self.draw_polytope(A, b * 3, ax, lw=0.75, ls='-', alpha=1)
 
+            # ax.scatter(*P, color='k', s=5, zorder=1)
             # ax.scatter(*P[:,self.n:], color='k', s=5, zorder=1)
             # ax.scatter(*canonical_points, color='k', s=5)
             
@@ -440,9 +452,10 @@ class Periodica:
             self.U, self.points, self.weights, use_circumcenter
         )
 
-        print(point_filtrations)
-        print(edge_filtrations)
-        print(shift_vectors)
+        # print(f'canonical_voronoi_points:\n{canonical_voronoi_points}')
+        # print(point_filtrations)
+        # print(edge_filtrations)
+        # print(shift_vectors)
 
         if self.d == 2:
             if not ax:
@@ -461,8 +474,11 @@ class Periodica:
 
             ax.scatter(*canonical_voronoi_points, color='r')
             for s, t in voronoi_edges:
-                ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='k', zorder=1)
+                ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='r', zorder=1)
             
+            # for s, t in periodic_voronoi_edges:
+            #     ax.plot(*voronoi_points[:,(s,t)], lw=1.5, color='r', zorder=2)
+
             for i in range(periodic_voronoi_edges.shape[0]):
                 s, t = periodic_voronoi_edges[i]
                 sP = canonical_voronoi_points[:,s]
@@ -484,13 +500,20 @@ class Periodica:
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
 
             # ax.scatter(*voronoi_points, color='r')
-            for s, t in periodic_voronoi_edges:
-                ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
-                
+            # for s, t in periodic_voronoi_edges:
+            #     ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
+            
+            for s,t in voronoi_edges:
+                ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='k', zorder=1)
+
+            # print(f'Number of canonical simplices: {canonical_voronoi_points.shape[1]}')
+            ax.scatter(*canonical_voronoi_points, color='g')
             for i in range(periodic_voronoi_edges.shape[0]):
                 s, t = periodic_voronoi_edges[i]
                 sP = canonical_voronoi_points[:,s]
                 tP = canonical_voronoi_points[:,t] + self.V[:,:-1] @ shift_vectors[:,i]
+
+                # print(f'{s}->{t} shift {shift_vectors[:,i]} sP {canonical_voronoi_points[:,s]} tP {canonical_voronoi_points[:,t]}+{self.V[:,:-1] @ shift_vectors[:,i]}')
                 ax.plot([sP[0], tP[0]], [sP[1], tP[1]], [sP[2], tP[2]], lw=1.5, color='r', zorder=2)
 
             ax.set_xlim(limits[0])
