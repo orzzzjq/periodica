@@ -582,7 +582,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
                 id.push_back(int(v));
             }
             delaunay_edges.push_back(id);
-            e_filtrations.push_back(sqrt(complex.filtration(simplex)));
+            e_filtrations.push_back((complex.filtration(simplex)));
         }
     }
 
@@ -746,202 +746,180 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
 
     Gudhi::Simplex_tree<> delaunay_complex = DelaunayComplex(working_points, working_weights);
 
-    // Get d-dimensional simplices
-    unordered_map<string, int> simplex_id_map;
-    vector<vector<int>> simplex_vertices;
-    vector<Eigen::VectorXi> simplex_shifts;
-    vector<Eigen::VectorXd> voronoi_points;
-    vector<double> v_point_filtrations;
-    vector<bool> canonical_simplex;
-    
-    auto simplexKey = [](const vector<int>& indices, const vector<Eigen::VectorXi>& shifts, int d) {
-        vector<vector<int>> verts;
-        for (int i = 0; i < indices.size(); ++i) {
-            vector<int> vi;
-            vi.push_back(indices[i]);
-            for (int j = 0; j < d; ++j) {
-                vi.push_back(shifts[i](j));
-            }
-            verts.push_back(vi);
+    // Construct vertex information (canonical index, shift vector)
+    vector<vector<int>> v_info;
+    for (int i = 0; i < working_points.cols(); ++i) {
+        vector<int> info;
+        info.push_back(I(i)); // canonical index
+        for (int j = 0; j < d; ++j) { // shift vector
+            info.push_back(S.col(i)(j));
         }
-        // Lexicographic order, e.g. [[0,0],[0,1],[-1,1]] -> [[-1,1],[0,0],[0,1]]
-        sort(verts.begin(), verts.end());
+        v_info.push_back(info);
+    }
+
+    // Get d-dimensional simplices
+    unordered_map<string, int> s_hashmap;
+    vector<vector<int>> s_vertices;
+    vector<Eigen::VectorXi> s_shifts;
+    vector<bool> is_canonical;
+    vector<Eigen::VectorXd> voronoi_points;
+    vector<double> voronoi_point_filtrations;
+    
+    // Map vertices information of a simplex to a string
+    auto str = [](const vector<vector<int>>& s_info) {
         string key;
-        for (const auto& v : verts) {
-            for (size_t j = 0; j < v.size(); ++j) {
-                if (j) key += ",";
-                key += to_string(v[j]);
+        key.reserve(s_info.size() * 10);
+        for (auto row : s_info) {
+            for (auto x : row) {
+                key += to_string(x);
+                key += ",";
             }
-            key += ";";
         }
         return key;
     };
 
+    // Compute necessary information of the d-simplices
+    int s_id = -1; // simplex index
     for (auto simplex : delaunay_complex.skeleton_simplex_range(d)) {
         if (delaunay_complex.dimension(simplex) != d) continue;
 
-        vector<int> vertices;
-        vector<simplexVertex> s_vertices;
+        s_id += 1;
+        vector<int> s_verts; // the indices of the vertices of the simplex
+        vector<vector<int>> s_info; // the array of v_info of the vertices
         for (auto v : delaunay_complex.simplex_vertex_range(simplex)) {
             int vi = static_cast<int>(v);
-            vertices.push_back(vi);
-            vector<double> p;
-            for (int i = 0; i < d; ++i) {
-                p.push_back(working_points(i, vi));
-            }
-            s_vertices.push_back(simplexVertex(p, vi));
+            s_verts.push_back(vi);
+            s_info.push_back(v_info[vi]);
         }
 
-        simplexVertex s_repr = s_vertices[0];
-        for (int i = 1; i < s_vertices.size(); ++i) {
-            if (s_vertices[i] < s_repr) {
-                s_repr = s_vertices[i];
-            }
+        // Sort the v_info in lexicographical order
+        sort(s_info.begin(), s_info.end());
+
+        // Get the shift vector of the representative and check if it's canonical
+        bool is_zero = true;
+        Eigen::VectorXi s_shift(d);
+        for (int i = 0; i < d; ++i) {
+            s_shift(i) = s_info[0][i + 1];
+            if (s_shift(i) != 0) is_zero = false;
         }
 
-        int s_repr_id = s_repr.id;
-        canonical_simplex.push_back(s_repr_id < n);
-        simplex_shifts.push_back(S.col(s_repr_id));
-
-        sort(vertices.begin(), vertices.end());
+        is_canonical.push_back(is_zero);
+        s_shifts.push_back(s_shift);        
+        s_hashmap.emplace(str(s_info), s_id);
+        s_vertices.push_back(s_verts);
+        voronoi_point_filtrations.push_back(-(delaunay_complex.filtration(simplex)));
+        
+        // Compute the center of the simplex, for visualization purpose
         Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
         if (useCircumCenter) {
-            vector<Eigen::VectorXd> simplex_points;
-            simplex_points.reserve(vertices.size());
-            for (int vi : vertices) {
-                simplex_points.push_back(working_points.col(vi));
+            vector<Eigen::VectorXd> s_points;
+            s_points.reserve(s_verts.size());
+            for (int vi : s_verts) {
+                s_points.push_back(working_points.col(vi));
             }
-            center = circumCenter(simplex_points);
+            center = circumCenter(s_points);
         } else {
-            for (int vi : vertices) {
+            for (int vi : s_verts) {
                 center += working_points.col(vi);
             }
-            center /= static_cast<double>(vertices.size());
+            center /= static_cast<double>(s_verts.size());
         }
-
-        int id = static_cast<int>(simplex_vertices.size());
-        vector<int> _indices;
-        vector<Eigen::VectorXi> _shifts;
-        for (auto vi : vertices) {
-            _indices.push_back(I(vi));
-            _shifts.push_back(S.col(vi));
-        }
-        simplex_id_map.emplace(simplexKey(_indices, _shifts, d), id);
-        simplex_vertices.push_back(std::move(vertices));
         voronoi_points.push_back(std::move(center));
-        v_point_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+    }
+
+    // Find the canonical copy of the simplices
+    vector<int> s_I(is_canonical.size()); // the canonical index of the simplex
+    map<int, int> canonical_id;
+    vector<int> canonical_voro_points;
+    // vector<double> voronoi_point_filtrations;
+    for (int i = 0; i < s_id + 1; ++i) {
+        if (is_canonical[i]) {
+            canonical_id[i] = canonical_voro_points.size();
+            canonical_voro_points.push_back(i);
+            // voronoi_point_filtrations.push_back(s_filtrations[i]);
+        }
+        vector<vector<int>> s_info;
+        for (auto vi : s_vertices[i]) {
+            s_info.push_back(v_info[vi]);
+            for (int j = 0; j < d; ++j) {
+                s_info.back()[j + 1] -= s_shifts[i](j);
+            }
+        }
+        sort(s_info.begin(), s_info.end());
+        string key = str(s_info);
+        if (s_hashmap.find(key) != s_hashmap.end()) {
+            s_I[i] = s_hashmap[key];
+        } else {
+            s_I[i] = -1;
+        }
     }
 
     // Voronoi edges connect adjacent d-simplices that share a (d-1)-face.
     vector<pair<int,int>> voronoi_edges;
-    vector<double> v_edge_filtrations;
+    vector<double> voronoi_edge_filtrations;
     for (auto simplex : delaunay_complex.skeleton_simplex_range(d-1)) {
         if (delaunay_complex.dimension(simplex) != d-1) continue;
 
         vector<int> cofaces;
         for (auto coface : delaunay_complex.cofaces_simplex_range(simplex, 1)) {
             // coface is a d-simplex handle
-            std::vector<int> verts;
+            vector<vector<int>> s_info; // the array of v_info of the vertices
             for (auto v : delaunay_complex.simplex_vertex_range(coface)) {
-                verts.push_back(static_cast<int>(v));
+                int vi = static_cast<int>(v);
+                s_info.push_back(v_info[vi]);
             }
-            vector<int> _indices;
-            vector<Eigen::VectorXi> _shifts;
-            for (auto vi : verts) {
-                _indices.push_back(I(vi));
-                _shifts.push_back(S.col(vi));
-            }
-            cofaces.push_back(simplex_id_map[simplexKey(_indices, _shifts, d)]);
+            sort(s_info.begin(), s_info.end());
+            cofaces.push_back(s_hashmap[str(s_info)]);
         }
 
+        // The simplex should have two cofaces
         if (cofaces.size() == 2) {
-            // The simplex has two cofaces
             voronoi_edges.push_back({cofaces[0], cofaces[1]});
-            v_edge_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+            voronoi_edge_filtrations.push_back(-(delaunay_complex.filtration(simplex)));
         }
     }
 
-    vector<int> v_I(canonical_simplex.size()); // the canonical index of the simplex
-    map<int, int> canonical_id;
-    vector<int> canonical_v_points;
-    vector<double> _p_filtrations;
-    // printf("v_I: ");
-    for (int i = 0; i < canonical_simplex.size(); ++i) {
-        if (canonical_simplex[i]) {
-            canonical_id[i] = canonical_v_points.size();
-            canonical_v_points.push_back(i);
-            _p_filtrations.push_back(v_point_filtrations[i]);
-        }
-        auto verts = simplex_vertices[i];
-        vector<int> _indices;
-        vector<Eigen::VectorXi> _shifts;
-        for (auto vi : verts) {
-            _indices.push_back(I(vi));
-            _shifts.push_back(S.col(vi) - simplex_shifts[i]);
-        }
-        auto key = simplexKey(_indices, _shifts, d);
-        if (simplex_id_map.find(key) != simplex_id_map.end()) {
-            v_I[i] = simplex_id_map[simplexKey(_indices, _shifts, d)];
-        } else {
-            v_I[i] = -1;
-        }
-        // printf("%d ", v_I[i]);
-    }
-    // printf("\n");
-
-    // printf("canonical v points: ");
-    // for (auto id : canonical_v_points) {
-    //     printf("%d, ", id);
-    // }
-    // printf("\n");
-
-    for (int i = 0; i < canonical_simplex.size(); ++i) {
-        if (v_I[i] != -1) {
-            v_I[i] = canonical_id[v_I[i]];
+    // Re-label the canonical voronoi points
+    for (int i = 0; i < is_canonical.size(); ++i) {
+        if (s_I[i] != -1) {
+            s_I[i] = canonical_id[s_I[i]];
         }
     }
 
-    vector<pair<int,int>> periodic_v_edges;
-    vector<double> _e_filtrations;
+    // Get the periodic voronoi edges
+    vector<int> periodic_voro_edges;
     for (int i = 0; i < voronoi_edges.size(); ++i) {
         auto [s,t] = voronoi_edges[i];
-        if (canonical_simplex[s] || canonical_simplex[t]) {
-            if (canonical_simplex[t] && !canonical_simplex[s]) {
-                swap(s, t);
-            }
-            // if (!canonical_simplex[t] && v_I[s] > v_I[t]) continue;
-            if (v_I[s] == -1 || v_I[t] == -1) continue;
-            periodic_v_edges.push_back({s,t});
-            _e_filtrations.push_back(v_edge_filtrations[i]);
+        if (s_I[s] == -1 || s_I[t] == -1) continue;
+        if (is_canonical[s] || is_canonical[t]) {
+            periodic_voro_edges.push_back(i);
         }
     }
 
-    // Get the results
-    int L = size(canonical_v_points);
-    int M = size(periodic_v_edges);
-    Eigen::MatrixXd v_points(d, L);
-    Eigen::MatrixXi v_edges(M, 2);
-    Eigen::VectorXd p_filtrations(L);
-    Eigen::VectorXd e_filtrations(M);
-    Eigen::MatrixXi e_shift(d, M);
+    // Organize the results
+    int L = size(canonical_voro_points);
+    int M = size(periodic_voro_edges);
+    Eigen::MatrixXd res_voronoi_points(d, L);
+    Eigen::MatrixXi res_voronoi_edges(M, 2);
+    Eigen::VectorXd res_point_filtrations(L);
+    Eigen::VectorXd res_edge_filtrations(M);
+    Eigen::MatrixXi res_edge_shifts(d, M);
 
     for (int i = 0; i < L; ++i) {
-        v_points.col(i) = voronoi_points[canonical_v_points[i]];
-        p_filtrations(i) = _p_filtrations[canonical_v_points[i]];
+        res_voronoi_points.col(i) = voronoi_points[canonical_voro_points[i]];
+        res_point_filtrations(i) = voronoi_point_filtrations[canonical_voro_points[i]];
     }
 
     for (int i = 0; i < M; ++i) {
-        // Voronoi edge between dual points of d-simplices.
-        auto [s, t] = periodic_v_edges[i];
-        v_edges(i, 0) = v_I[s];
-        v_edges(i, 1) = v_I[t];
-        // v_edges(i, 0) = s;
-        // v_edges(i, 1) = t;
-        e_filtrations(i) = _e_filtrations[i];
-        e_shift.col(i) = simplex_shifts[t];
+        auto [s, t] = voronoi_edges[periodic_voro_edges[i]];
+        if (!is_canonical[s]) swap(s,t);
+        res_voronoi_edges(i, 0) = s_I[s];
+        res_voronoi_edges(i, 1) = s_I[t];
+        res_edge_filtrations(i) = voronoi_edge_filtrations[periodic_voro_edges[i]];
+        res_edge_shifts.col(i) = s_shifts[t];
     }
 
-    return {v_points, v_edges, p_filtrations, e_filtrations, e_shift};
+    return {res_voronoi_points, res_voronoi_edges, res_point_filtrations, res_edge_filtrations, res_edge_shifts};
 }
 
 

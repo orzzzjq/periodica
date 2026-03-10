@@ -26,7 +26,7 @@ def run_3d_quotient_example():
 
 def run_2d_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=4, d=2, seed=3)
+    periodica.generate_random_points(n_points=4, d=2, seed=3)
     periodica.plot_delaunay(show=True)
     periodica.print_merge_tree()
     # periodica.plot_barcodes(show=False)
@@ -35,15 +35,23 @@ def run_2d_delaunay_example():
     
 def run_2d_voronoi_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=1, d=2, seed=1)
-    periodica.plot_voronoi(show=True, use_circumcenter=True)
-    # periodica.print_merge_tree()
+    periodica.generate_random_points(n_points=5, d=2, seed=1)
+    periodica.quotient_complex('voronoi')
+    periodica.print_merge_tree()
+    periodica.plot_voronoi(show=False, use_circumcenter=True)
+    periodica.plot_barcodes(show=False)
+    periodica.plot_diagram(show=False)
+    periodica.plot_images(same_range=True, show=True)
     
 def run_3d_voronoi_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=1, d=3, seed=1)
-    periodica.plot_voronoi(show=True, use_circumcenter=True)
-    # periodica.print_merge_tree()
+    periodica.generate_random_points(n_points=1, d=3, seed=1)
+    periodica.plot_voronoi(show=False, use_circumcenter=True)
+    periodica.quotient_complex('voronoi')
+    periodica.print_merge_tree()
+    periodica.plot_barcodes(show=False)
+    periodica.plot_diagram(show=False)
+    periodica.plot_images(same_range=True, show=True)
 
 def run_2d_grid_example():
     periodica = Periodica()
@@ -53,14 +61,14 @@ def run_2d_grid_example():
 def run_2d_weighted_grid_example():
     periodica = Periodica()
     periodica.generate_grid_points(d=2, k=3)
-    weights = [0] * periodica.n
+    weights = [0] * periodica.n_points
     weights[0] = 0.1
     periodica.set_weights(weights)
     periodica.plot_delaunay(show=True)
 
 def run_2d_weighted_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=10, d=2)
+    periodica.generate_random_points(n_points=10, d=2)
     periodica.plot_delaunay(show=True)
     periodica.print_merge_tree()
     # periodica.plot_barcodes(show=False)
@@ -69,7 +77,7 @@ def run_2d_weighted_delaunay_example():
 
 def run_3d_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=4, d=3)
+    periodica.generate_random_points(n_points=4, d=3)
     periodica.plot_delaunay(show=False)
     periodica.print_merge_tree()
     periodica.plot_barcodes(show=False)
@@ -78,7 +86,7 @@ def run_3d_delaunay_example():
 
 def run_3d_weighted_delaunay_example():
     periodica = Periodica()
-    periodica.generate_random_points(n=4, d=3)
+    periodica.generate_random_points(n_points=4, d=3)
     periodica.plot_delaunay(show=False)
     periodica.print_merge_tree()
     periodica.plot_barcodes(show=False)
@@ -90,7 +98,7 @@ if __name__ == "__main__":
     # run_2d_quotient_example_2()
     # run_3d_quotient_example()
     
-    run_2d_delaunay_example()
+    # run_2d_delaunay_example()
     # run_3d_delaunay_example()
 
     # run_2d_weighted_delaunay_example()
@@ -99,5 +107,5 @@ if __name__ == "__main__":
     # run_2d_grid_example()
     # run_2d_weighted_grid_example()
 
-    # run_2d_voronoi_example()
+    run_2d_voronoi_example()
     # run_3d_voronoi_example()

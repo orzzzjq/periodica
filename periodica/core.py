@@ -32,12 +32,12 @@ blue = "#7E7EFF"
 green = "#30B830"
 
 class Periodica:
-    def generate_random_points(self, n, d, seed=4):
+    def generate_random_points(self, n_points, d, seed=4):
         np.random.seed(seed)
-        self.n = n      # number of points
+        self.n_points = n_points      # number of points
         self.d = d      # dimension
         self.U = np.random.rand(d, d) * 2 - 1       # original basis
-        self.points = self.U @ np.random.rand(d, n) # points in unit cell
+        self.points = self.U @ np.random.rand(d, n_points) # points in unit cell
         # self.U = np.identity(d) * 2
         # self.points = self.U @ np.ndarray((d, n)) # points in unit cell
 
@@ -51,7 +51,7 @@ class Periodica:
         mesh = np.meshgrid(*([axis] * d), indexing='ij')
         grid = np.stack([m.reshape(-1) for m in mesh], axis=0)
 
-        self.n = grid.shape[1]  # total number of grid points = k**d
+        self.n_points = grid.shape[1]  # total number of grid points = k**d
         self.points = self.U @ grid
 
     def set_weights(self, weights):
@@ -66,13 +66,28 @@ class Periodica:
             raise Exception('weights length must equal number of points')
         self.weights = weights
         self.V = _periodica.reduced_basis(self.U)    # reduced basis
+        self.quotient_vertex_filtration = self.weights
         self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = _periodica.periodic_delaunay(self.U, self.points, self.weights)
+
+    def periodic_voronoi(self):
+        if not hasattr(self, 'points'):
+            raise Exception('No input points')
+        weights = getattr(self, 'weights', np.zeros(self.points.shape[1], dtype=float))
+        weights = np.asarray(weights, dtype=float).reshape(-1)
+        if weights.shape[0] != self.points.shape[1]:
+            raise Exception('weights length must equal number of points')
+        self.weights = weights
+        self.V = _periodica.reduced_basis(self.U)    # reduced basis
+        _, self.quotient_arcs, self.quotient_vertex_filtration, self.quotient_arc_filtration, self.quotient_arc_shift = \
+            _periodica.periodic_voronoi(self.U, self.points, self.weights)
+        self.n_quotient_vertices = _.shape[1]
+
 
     def quotient_complex(self, complex_type='delaunay'):
         if complex_type == 'delaunay':
             self.periodic_delaunay()
         elif complex_type == 'voronoi':
-            pass
+            self.periodic_voronoi()
         else:
             raise Exception(f'Does not support complex type {complex_type}')
 
@@ -92,9 +107,9 @@ class Periodica:
             self.V = np.array(self.V)
             # vertices
             f.readline()
-            self.n = int(f.readline())
+            self.n_quotient_vertices = int(f.readline())
             self.quotient_vertex_filtration = []
-            for i in range(self.n):
+            for i in range(self.n_quotient_vertices):
                 self.quotient_vertex_filtration.append(float(f.readline().split(' ')[-1]))
             self.quotient_vertex_filtration = np.array(self.quotient_vertex_filtration)
             # arcs
@@ -123,9 +138,9 @@ class Periodica:
         if not hasattr(self, 'quotient_arcs'):
             self.quotient_complex()
         if hasattr(self, 'quotient_vertex_filtration'):
-            self.tree = _periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift, self.quotient_vertex_filtration)
+            self.tree = _periodica.merge_tree(self.n_quotient_vertices, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift, self.quotient_vertex_filtration)
         else:
-            self.tree = _periodica.merge_tree(self.n, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
+            self.tree = _periodica.merge_tree(self.n_quotient_vertices, self.d, self.V, self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift)
         return self.tree
 
     def print_merge_tree(self):
@@ -325,18 +340,46 @@ class Periodica:
                                     edgecolor='None', linewidth=2, label='Convex Hull', zorder=-1)
                 ax.add_patch(hull_polygon)
         else:
-            for simplex in hull.simplices:
-                ax.plot(domain_vertices[simplex, 0], domain_vertices[simplex, 1], domain_vertices[simplex, 2], color=color, lw=lw, ls=ls, alpha=alpha)
-                ax.plot(domain_vertices[[simplex[-1], simplex[0]], 0], domain_vertices[[simplex[-1], simplex[0]], 1], domain_vertices[[simplex[-1], simplex[0]], 2], color=color, lw=lw, ls=ls, alpha=alpha)
-                ax.add_collection3d(
-                    Poly3DCollection(
-                        [domain_vertices[simplex]],
-                        linewidths=0,
-                        facecolors=color,
-                        edgecolors='none',
-                        alpha=0.1,
-                    )
+            # Fill triangular facets without drawing edges, then draw only
+            # non-coplanar facet intersections (true polytope edges).
+            ax.add_collection3d(
+                Poly3DCollection(
+                    [domain_vertices[simplex] for simplex in hull.simplices],
+                    linewidths=0,
+                    facecolors=color,
+                    edgecolors='none',
+                    alpha=0.1,
                 )
+            )
+
+            edge_to_facets = {}
+            for facet_idx, simplex in enumerate(hull.simplices):
+                for i, j in ((0, 1), (1, 2), (2, 0)):
+                    edge = tuple(sorted((simplex[i], simplex[j])))
+                    edge_to_facets.setdefault(edge, []).append(facet_idx)
+
+            for edge, facets in edge_to_facets.items():
+                draw_edge = False
+                if len(facets) <= 1:
+                    draw_edge = True
+                else:
+                    ref_eq = hull.equations[facets[0]]
+                    draw_edge = any(
+                        not np.allclose(ref_eq, hull.equations[f], atol=1e-9, rtol=1e-6)
+                        for f in facets[1:]
+                    )
+
+                if draw_edge:
+                    edge_pts = domain_vertices[list(edge)]
+                    ax.plot(
+                        edge_pts[:, 0],
+                        edge_pts[:, 1],
+                        edge_pts[:, 2],
+                        color=color,
+                        lw=lw,
+                        ls=ls,
+                        alpha=alpha,
+                    )
 
     def draw_unit_cell(self, basis, ax, color=green):
         cell_vertices = []
@@ -361,7 +404,7 @@ class Periodica:
         if not hasattr(self, 'V'):
             self.V = _periodica.reduced_basis(self.U)
         if not hasattr(self, 'weights'):
-            self.weights = np.zeros(self.n)
+            self.weights = np.zeros(self.n_points)
         
         A, b =  _periodica.dirichlet_domain(self.V)
         P, delaunay_edges = _periodica.full_delaunay(self.U, self.points, self.weights)
@@ -439,7 +482,7 @@ class Periodica:
         if not hasattr(self, 'V'):
             self.V = _periodica.reduced_basis(self.U)
         if not hasattr(self, 'weights'):
-            self.weights = np.zeros(self.n)
+            self.weights = np.zeros(self.n_points)
         
         if not ax:
             fig = plt.figure()
@@ -455,7 +498,9 @@ class Periodica:
         # print(f'canonical_voronoi_points:\n{canonical_voronoi_points}')
         # print(point_filtrations)
         # print(edge_filtrations)
-        # print(shift_vectors)
+        # for i in range(shift_vectors.shape[1]):
+        #     print(f'{periodic_voronoi_edges[i]} : {shift_vectors[:,i]}')
+        # # print(shift_vectors)
 
         if self.d == 2:
             if not ax:
@@ -474,7 +519,7 @@ class Periodica:
 
             ax.scatter(*canonical_voronoi_points, color='r')
             for s, t in voronoi_edges:
-                ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='r', zorder=1)
+                ax.plot(*voronoi_points[:,(s,t)], '-.', lw=1, color='r', zorder=1)
             
             # for s, t in periodic_voronoi_edges:
             #     ax.plot(*voronoi_points[:,(s,t)], lw=1.5, color='r', zorder=2)
@@ -504,7 +549,7 @@ class Periodica:
             #     ax.plot(*voronoi_points[:,(s,t)], color='r', zorder=1)
             
             for s,t in voronoi_edges:
-                ax.plot(*voronoi_points[:,(s,t)], '--', lw=1, color='k', zorder=1)
+                ax.plot(*voronoi_points[:,(s,t)], '-.', lw=1, color='k', zorder=1)
 
             # print(f'Number of canonical simplices: {canonical_voronoi_points.shape[1]}')
             ax.scatter(*canonical_voronoi_points, color='g')
