@@ -13,6 +13,8 @@ import matplotlib.animation as animation
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from matplotlib.patches import Polygon
+from matplotlib.patches import Circle
+from matplotlib.widgets import Slider
 
 from functools import wraps
 from time import perf_counter
@@ -169,7 +171,7 @@ class Periodica:
             self.persistence_images.append(_periodica.image(self.bcodes[i], size, xmin, xmax))
         return self.persistence_images
 
-    def plot_barcodes(self, show=True):
+    def plot_barcodes(self, show=True, ax=None):
         if not hasattr(self, 'bcodes'):
             self.barcodes()
         
@@ -177,9 +179,15 @@ class Periodica:
         sep = 1
         labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
-        fig, ax = plt.subplots(self.d + 1, 1)
-        fig.set_size_inches(5, (self.d + 1) * 2)
-        plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+        own_figure = ax is None
+        if own_figure:
+            fig, ax = plt.subplots(self.d + 1, 1)
+            fig.set_size_inches(5, (self.d + 1) * 2)
+            plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+
+        ax = np.atleast_1d(ax)
+        if ax.shape[0] != self.d + 1:
+            raise ValueError(f'ax must contain {self.d + 1} axes')
 
         xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
         xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
@@ -204,28 +212,35 @@ class Periodica:
                 axi.plot([birth, death if death < inf else xmax], np.ones(2) * y, lw=2, color='k')
                 axi.text(birth - xspan * 0.01, y, f'{multiplicity:.3f}', fontsize=8, horizontalalignment='right', verticalalignment='center')
 
-        plt.get_current_fig_manager().set_window_title('Barcode')
-        if show:
-            plt.show()
-        plt.savefig('barcode.svg')
+        if own_figure:
+            plt.get_current_fig_manager().set_window_title('Barcode')
+            if show:
+                plt.show()
+            plt.savefig('barcode.svg')
 
-    def plot_diagram(self, show=True):
+    def plot_diagram(self, show=True, ax=None):
         if not hasattr(self, 'bcodes'):
             self.barcodes()
 
         inf = 1e+308
         labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
-        fig, ax = plt.subplots(self.d + 1, 1)
-        fig.set_size_inches(5, (self.d + 1) * 2)
-        plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+        own_figure = ax is None
+        if own_figure:
+            fig, ax = plt.subplots(self.d + 1, 1)
+            fig.set_size_inches(5, (self.d + 1) * 2)
+            plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+
+        ax = np.atleast_1d(ax)
+        if ax.shape[0] != self.d + 1:
+            raise ValueError(f'ax must contain {self.d + 1} axes')
 
         xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
         xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
-        xticks = np.linspace(0, xmax, 5)[:-1]
-        # print(f'xmin {xmin} xmax {xmax}')
+        xticks = np.linspace(xmin, xmax, 5)[:-1]
+        print(f'xmin {xmin} xmax {xmax}')
 
         for i in range(self.d + 1):
             axi = ax[self.d + 1 - i - 1]
@@ -244,21 +259,28 @@ class Periodica:
                 axi.scatter(birth, death if death < inf else xmax, s=2, color='k')
                 axi.text(birth + xspan * 0.05, death if death < inf else xmax, f'{multiplicity:.3f}', fontsize=8, horizontalalignment='left', verticalalignment='center')
 
-        plt.get_current_fig_manager().set_window_title('Diagram')
-        if show:
-            plt.show()
-        plt.savefig('diagram.svg')
+        if own_figure:
+            plt.get_current_fig_manager().set_window_title('Diagram')
+            if show:
+                plt.show()
+            plt.savefig('diagram.svg')
             
-    def plot_images(self, same_range=True, show=True):
+    def plot_images(self, same_range=True, show=True, ax=None):
         if not hasattr(self, 'persistence_images'):
             self.images()
 
         inf = 1e+308
         labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
-        fig, ax = plt.subplots(self.d + 1, 1)
-        fig.set_size_inches(5, (self.d + 1) * 2)
-        plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+        own_figure = ax is None
+        if own_figure:
+            fig, ax = plt.subplots(self.d + 1, 1)
+            fig.set_size_inches(5, (self.d + 1) * 2)
+            plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+
+        ax = np.atleast_1d(ax)
+        if ax.shape[0] != self.d + 1:
+            raise ValueError(f'ax must contain {self.d + 1} axes')
 
         xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
         xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
@@ -269,7 +291,7 @@ class Periodica:
         imgsize = self.persistence_images[0].shape[0]
         gap = (xmax - xmin) / imgsize
 
-        xticks = np.linspace(0, xmax, 5)[:-1]
+        xticks = np.linspace(xmin, xmax, 5)[:-1]
         xtickpos = [(x - xmin) // gap for x in xticks]
 
         vmax = max(map(lambda img: np.max(img), self.persistence_images))
@@ -298,10 +320,28 @@ class Periodica:
 
             axi.text(imgsize * 0.95, imgsize * 0.95, labels[i], horizontalalignment='right', verticalalignment='top')
 
-        plt.get_current_fig_manager().set_window_title('Image')
+        if own_figure:
+            plt.get_current_fig_manager().set_window_title('Image')
+            if show:
+                plt.show()
+            plt.savefig('image.svg')
+
+    def plot_all_descriptors(self, same_range=True, show=True):
+        fig, ax = plt.subplots(self.d + 1, 3, squeeze=False, gridspec_kw={'width_ratios': [2, 1, 1]})
+        fig.set_size_inches(15, (self.d + 1) * 2)
+        plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2, wspace=0.12)
+
+        self.plot_barcodes(show=False, ax=ax[:, 0])
+        self.plot_diagram(show=False, ax=ax[:, 1])
+        self.plot_images(same_range=same_range, show=False, ax=ax[:, 2])
+
+        ax[0, 0].set_title('Barcode')
+        ax[0, 1].set_title('Diagram')
+        ax[0, 2].set_title('Image')
+        plt.get_current_fig_manager().set_window_title('All descriptors')
         if show:
             plt.show()
-        plt.savefig('image.svg')
+        plt.savefig('all_descriptors.svg')
 
     def domain_vertices(self, A, b):
         res = []
@@ -476,7 +516,7 @@ class Periodica:
             plt.show()
         # plt.savefig('delaunay.svg')
 
-    def plot_voronoi(self, show=True, animation_gif=None, use_circumcenter=False, ax=None):
+    def plot_voronoi(self, show=True, animation_gif=None, use_circumcenter=False, ax=None, slidebar=False):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
         if not hasattr(self, 'V'):
@@ -488,6 +528,8 @@ class Periodica:
             fig = plt.figure()
         
         A, b =  _periodica.dirichlet_domain(self.V)
+        P, _, __ = _periodica.points_in_3x_domain(self.V, A, b, self.points)
+
         voronoi_points, voronoi_edges = _periodica.full_voronoi(
             self.U, self.points, self.weights, use_circumcenter
         )
@@ -495,12 +537,7 @@ class Periodica:
             self.U, self.points, self.weights, use_circumcenter
         )
 
-        # print(f'canonical_voronoi_points:\n{canonical_voronoi_points}')
-        # print(point_filtrations)
-        # print(edge_filtrations)
-        # for i in range(shift_vectors.shape[1]):
-        #     print(f'{periodic_voronoi_edges[i]} : {shift_vectors[:,i]}')
-        # # print(shift_vectors)
+        max_radius = np.sqrt(-np.min(point_filtrations))
 
         if self.d == 2:
             if not ax:
@@ -533,6 +570,25 @@ class Periodica:
             ax.set_xlim(limits[0])
             ax.set_ylim(limits[1])
             ax.set_aspect(1)
+
+            if slidebar:
+                host_fig = ax.figure
+                host_fig.subplots_adjust(bottom=0.2)
+                slider_ax = host_fig.add_axes([0.2, 0.08, 0.6, 0.04])
+                radius_slider = Slider(slider_ax, 'R', 0.0, max_radius, valinit=0.0)
+                circles = []
+                for i in range(P.shape[1]):
+                    circle = Circle((P[0, i], P[1, i]), radius=0.0, fill=True, color='#aaaaaa', alpha=1, zorder=0.5)
+                    ax.add_patch(circle)
+                    circles.append(circle)
+
+                def update_radius(radius):
+                    for circle in circles:
+                        circle.set_radius(radius)
+                    ax.figure.canvas.draw_idle()
+
+                radius_slider.on_changed(update_radius)
+                self._voronoi_radius_slider = radius_slider
         
         else:
             if not ax:
