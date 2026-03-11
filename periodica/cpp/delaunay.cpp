@@ -574,6 +574,24 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 
     vector<vector<int>> delaunay_edges;
     vector<double> e_filtrations;
+    // vector<double> v_filtrations(n, 0);
+
+    // for (auto s : complex.skeleton_simplex_range(0)) {
+    //     for (auto v : complex.simplex_vertex_range(s)) {
+    //         int id = static_cast<int>(v);
+    //         if (id < n) {
+    //             v_filtrations[id] = (complex.filtration(s));
+    //         }
+    //         // printf("[debug] %d, ", id);
+    //     }
+    //     // printf("\n");
+    // }
+
+    // printf("[debug] ");
+    // for (auto x : v_filtrations) {
+    //     printf("%f, ", x);
+    // }
+    // printf("\n");
 
     for (auto simplex : complex.skeleton_simplex_range(1)) {
         if (complex.dimension(simplex)) {
@@ -582,7 +600,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
                 id.push_back(int(v));
             }
             delaunay_edges.push_back(id);
-            e_filtrations.push_back((complex.filtration(simplex)));
+            e_filtrations.push_back(sqrt(complex.filtration(simplex)));
         }
     }
 
@@ -629,16 +647,6 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
         edges(i, 0) = I(s);
         edges(i, 1) = I(t);
         
-        // filtration value
-        // double sq_dist = 0;
-        // if (d == 2) {
-        //     double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t);
-        //     sq_dist = dx * dx + dy * dy;
-        // }
-        // else {
-        //     double dx = working_points(0, s) - working_points(0, t), dy = working_points(1, s) - working_points(1, t), dz = working_points(2, s) - working_points(2, t);
-        //     sq_dist = dx * dx + dy * dy + dz * dz;
-        // }
         filtration(i) = quotient_filtrations[i];
 
         // shift vector
@@ -807,7 +815,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         s_shifts.push_back(s_shift);        
         s_hashmap.emplace(str(s_info), s_id);
         s_vertices.push_back(s_verts);
-        voronoi_point_filtrations.push_back(-(delaunay_complex.filtration(simplex)));
+        voronoi_point_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
         
         // Compute the center of the simplex, for visualization purpose
         Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
@@ -875,7 +883,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         // The simplex should have two cofaces
         if (cofaces.size() == 2) {
             voronoi_edges.push_back({cofaces[0], cofaces[1]});
-            voronoi_edge_filtrations.push_back(-(delaunay_complex.filtration(simplex)));
+            voronoi_edge_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
         }
     }
 

@@ -1,4 +1,5 @@
 from periodica.core import Periodica
+import numpy as np
 
 def run_2d_quotient_example_1():
     periodica = Periodica()
@@ -24,89 +25,127 @@ def run_3d_quotient_example():
     periodica.plot_diagram(show=False)
     periodica.plot_images(same_range=True, show=True)
 
-def run_2d_delaunay_example():
+def run_example(INPUT, TYPE='delaunay'):
+    print(f'Quotient complex type: {TYPE}')
     periodica = Periodica()
-    periodica.generate_random_points(n_points=4, d=2, seed=3)
-    periodica.plot_delaunay(show=True)
-    periodica.print_merge_tree()
-    # periodica.plot_barcodes(show=False)
-    # periodica.plot_diagram(show=False)
-    # periodica.plot_images(same_range=True, show=True)
-    
-def run_2d_voronoi_example():
-    periodica = Periodica()
-    periodica.generate_random_points(n_points=10, d=2, seed=1)
-    periodica.quotient_complex('voronoi')
-    periodica.print_merge_tree()
-    periodica.plot_voronoi(show=False, slidebar=True, use_circumcenter=True)
-    # periodica.plot_barcodes(show=False)
-    # periodica.plot_diagram(show=False)
-    # periodica.plot_images(same_range=True, show=True)
-    periodica.plot_all_descriptors(show=True)
-    
-def run_3d_voronoi_example():
-    periodica = Periodica()
-    periodica.generate_random_points(n_points=1, d=3, seed=1)
-    periodica.plot_voronoi(show=False, use_circumcenter=True)
-    periodica.quotient_complex('voronoi')
-    periodica.print_merge_tree()
-    periodica.plot_barcodes(show=False)
-    periodica.plot_diagram(show=False)
-    periodica.plot_images(same_range=True, show=True)
+    periodica.set_geometry(INPUT)
+    periodica.quotient_complex(TYPE)
+    periodica.merge_tree()
+    periodica.plot_all_descriptors(show=False, same_range=False)
+    periodica.plot_geometry(TYPE, show=True, slidebar=True)
 
-def run_2d_grid_example():
-    periodica = Periodica()
-    periodica.generate_grid_points(d=2, k=3)
-    periodica.plot_delaunay(show=True)
 
-def run_2d_weighted_grid_example():
-    periodica = Periodica()
-    periodica.generate_grid_points(d=2, k=3)
-    weights = [0] * periodica.n_points
-    weights[0] = 0.1
-    periodica.set_weights(weights)
-    periodica.plot_delaunay(show=True)
-
-def run_2d_weighted_delaunay_example():
-    periodica = Periodica()
-    periodica.generate_random_points(n_points=10, d=2)
-    periodica.plot_delaunay(show=True)
-    periodica.print_merge_tree()
-    # periodica.plot_barcodes(show=False)
-    # periodica.plot_diagram(show=False)
-    # periodica.plot_images(same_range=True, show=True)
-
-def run_3d_delaunay_example():
-    periodica = Periodica()
-    periodica.generate_random_points(n_points=4, d=3)
-    periodica.plot_delaunay(show=False)
-    periodica.print_merge_tree()
-    periodica.plot_barcodes(show=False)
-    periodica.plot_diagram(show=False)
-    periodica.plot_images(same_range=True, show=True)
-
-def run_3d_weighted_delaunay_example():
-    periodica = Periodica()
-    periodica.generate_random_points(n_points=4, d=3)
-    periodica.plot_delaunay(show=False)
-    periodica.print_merge_tree()
-    periodica.plot_barcodes(show=False)
-    periodica.plot_diagram(show=False)
-    periodica.plot_images(same_range=True, show=True)
+EXAMPLES = {
+"2d" : {
+    "square" : {
+        "d" : 2,
+        "U" : np.eye(2),
+        "n_points" : 4,
+        "points" : np.array([
+            [0, 0],
+            [0.5, 0.5],
+            [0.5, 0],
+            [0, 0.5]
+        ]).T
+    },
+    "weighted" : {
+        "d" : 2,
+        "U" : np.eye(2),
+        "n_points" : 4,
+        "points" : np.array([
+            [0, 0],
+            [0.5, 0.5],
+            [0.5, 0],
+            [0, 0.5]
+        ]).T,
+        "weights" : np.array([
+            0.249, 0, 0, 0
+        ])
+    },
+    "hexagon" : {
+        "d" : 2,
+        "U" : np.array([
+            [1, np.cos(np.pi/3)],
+            [0, np.sin(np.pi/3)]
+        ]),
+        "n_points" : 1,
+        "points" : np.array([
+            [0, 0],
+        ]).T
+    },
+    "tunnel" : {
+        "d" : 2,
+        "U" : np.eye(2),
+        "n_points" : 4,
+        "points" : np.array([
+            [0, 0],
+            [0.25, 0.25],
+            [0.5, 0.5],
+            [0.75, 0.75],
+        ]).T
+    },
+    "cycle" : {
+        "d" : 2,
+        "U" : np.eye(2),
+        "n_points" : 6,
+        "points" : np.array([
+            [0.5, 0.0],
+            [0.15, 0.15],
+            [0.85, 0.15],
+            [0.15, 0.85],
+            [0.85, 0.85],
+            [0.0, 0.5],
+        ]).T
+    }
+},
+"3d" : {
+    "cube" : {
+        "d" : 3,
+        "U" : np.eye(3),
+        "n_points" : 1,
+        "points" : np.array([
+            [0.5, 0.5, 0.5],
+        ]).T
+    },
+    "diamond" : {
+        "d" : 3,
+        "U" : np.array([
+            [0, 1, 1],
+            [1, 0, 1],
+            [1, 1, 0]
+        ]),
+        "n_points" : 2,
+        "points" : np.array([
+            [0, 0, 0],
+            [0.5, 0.5, 0.5]
+        ]).T
+    },
+    "line" : {
+        "d" : 3,
+        "U" : np.eye(3),
+        "n_points" : 4,
+        "points" : np.array([
+            [0,0,z] for z in [0, 0.25, 0.5, 0.75]]).T
+    },
+}
+}
 
 if __name__ == "__main__":
     # run_2d_quotient_example_1()
     # run_2d_quotient_example_2()
     # run_3d_quotient_example()
     
-    # run_2d_delaunay_example()
-    # run_3d_delaunay_example()
+    run_example(EXAMPLES['2d']['square'])
+    # run_example(EXAMPLES['2d']['square'], 'voronoi')
+    # run_example(EXAMPLES['2d']['hexagon'])
+    # run_example(EXAMPLES['2d']['hexagon'], 'voronoi')
+    # run_example(EXAMPLES['2d']['tunnel'])
+    # run_example(EXAMPLES['2d']['tunnel'], 'voronoi')
+    # run_example(EXAMPLES['2d']['cycle'])
+    # run_example(EXAMPLES['2d']['cycle'], 'voronoi')
+    # run_example(EXAMPLES['2d']['weighted'])
+    # run_example(EXAMPLES['2d']['weighted'], 'voronoi')
 
-    # run_2d_weighted_delaunay_example()
-    # run_3d_weighted_delaunay_example()
-
-    # run_2d_grid_example()
-    # run_2d_weighted_grid_example()
-
-    run_2d_voronoi_example()
-    # run_3d_voronoi_example()
+    # run_example(EXAMPLES['3d']['cube'])
+    # run_example(EXAMPLES['3d']['line'])
+    # run_example(EXAMPLES['3d']['diamond'])

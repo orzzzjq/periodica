@@ -34,31 +34,18 @@ blue = "#7E7EFF"
 green = "#30B830"
 
 class Periodica:
-    def generate_random_points(self, n_points, d, seed=4):
-        np.random.seed(seed)
-        self.n_points = n_points      # number of points
-        self.d = d      # dimension
-        self.U = np.random.rand(d, d) * 2 - 1       # original basis
-        self.points = self.U @ np.random.rand(d, n_points) # points in unit cell
-        # self.U = np.identity(d) * 2
-        # self.points = self.U @ np.ndarray((d, n)) # points in unit cell
-
-    def generate_grid_points(self, d, k, seed=4):
-        np.random.seed(seed)
-        self.d = d      # dimension
-        self.U = np.random.rand(d, d) * 2 - 1       # original basis
-
-        # Uniform grid in [0, 1), with k samples per axis and 1 excluded.
-        axis = np.arange(k, dtype=float) / float(k)
-        mesh = np.meshgrid(*([axis] * d), indexing='ij')
-        grid = np.stack([m.reshape(-1) for m in mesh], axis=0)
-
-        self.n_points = grid.shape[1]  # total number of grid points = k**d
-        self.points = self.U @ grid
+    def set_geometry(self, INPUT):
+        self.d = INPUT['d']
+        self.U = INPUT['U']
+        self.n_points = INPUT['n_points']
+        self.points = INPUT['points']
+        if 'weights' in INPUT.keys():
+            self.weights = INPUT['weights']
 
     def set_weights(self, weights):
         self.weights = np.array(weights)
 
+    @timing
     def periodic_delaunay(self):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
@@ -68,9 +55,11 @@ class Periodica:
             raise Exception('weights length must equal number of points')
         self.weights = weights
         self.V = _periodica.reduced_basis(self.U)    # reduced basis
-        self.quotient_vertex_filtration = self.weights
+        self.n_quotient_vertices = self.n_points
+        self.quotient_vertex_filtration = -np.sqrt(self.weights)
         self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = _periodica.periodic_delaunay(self.U, self.points, self.weights)
 
+    @timing
     def periodic_voronoi(self):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
@@ -83,7 +72,6 @@ class Periodica:
         _, self.quotient_arcs, self.quotient_vertex_filtration, self.quotient_arc_filtration, self.quotient_arc_shift = \
             _periodica.periodic_voronoi(self.U, self.points, self.weights)
         self.n_quotient_vertices = _.shape[1]
-
 
     def quotient_complex(self, complex_type='delaunay'):
         if complex_type == 'delaunay':
@@ -438,7 +426,7 @@ class Periodica:
         for e in edges:
             ax.plot(*cell_vertices[e,:].T, color=color, lw=1)
     
-    def plot_delaunay(self, show=True, animation_gif=None, ax=None):
+    def plot_delaunay(self, show=True, animation_gif=None, ax=None, slidebar=False):
         if not hasattr(self, 'points'):
             raise Exception('No input points')
         if not hasattr(self, 'V'):
@@ -447,8 +435,13 @@ class Periodica:
             self.weights = np.zeros(self.n_points)
         
         A, b =  _periodica.dirichlet_domain(self.V)
+        P, I, __ = _periodica.points_in_3x_domain(self.V, A, b, self.points)
         P, delaunay_edges = _periodica.full_delaunay(self.U, self.points, self.weights)
         self.periodic_delaunay()
+
+        show_slidebar = slidebar and not ax
+        inf = 1e+308
+        max_radius = max(map(lambda x: x if x < inf else -inf, self.quotient_arc_filtration))
 
         if not ax:
             fig = plt.figure()
@@ -484,6 +477,25 @@ class Periodica:
                 ax.plot([sP[0], tP[0]], [sP[1], tP[1]], lw=1.5, color='#0000FE', zorder=1)
 
             ax.set_aspect(1)
+
+            if show_slidebar:
+                host_fig = ax.figure
+                host_fig.subplots_adjust(bottom=0.2)
+                slider_ax = host_fig.add_axes([0.2, 0.08, 0.6, 0.04])
+                radius_slider = Slider(slider_ax, 'R', 0, max_radius, valinit=0.0)
+                circles = []
+                for i in range(P.shape[1]):
+                    circle = Circle((P[0, i], P[1, i]), radius=np.sqrt(self.weights[I[i]]), fill=True, color='#aaaaaa', alpha=1, zorder=0.5)
+                    ax.add_patch(circle)
+                    circles.append(circle)
+
+                def update_radius(radius):
+                    for i in range(len(circles)):
+                        circles[i].set_radius(radius + np.sqrt(self.weights[I[i]]))
+                    ax.figure.canvas.draw_idle()
+
+                radius_slider.on_changed(update_radius)
+                self._voronoi_radius_slider = radius_slider
         
         else:
             if not ax:
@@ -528,7 +540,7 @@ class Periodica:
             fig = plt.figure()
         
         A, b =  _periodica.dirichlet_domain(self.V)
-        P, _, __ = _periodica.points_in_3x_domain(self.V, A, b, self.points)
+        P, I, __ = _periodica.points_in_3x_domain(self.V, A, b, self.points)
 
         voronoi_points, voronoi_edges = _periodica.full_voronoi(
             self.U, self.points, self.weights, use_circumcenter
@@ -578,13 +590,13 @@ class Periodica:
                 radius_slider = Slider(slider_ax, 'R', 0.0, max_radius, valinit=0.0)
                 circles = []
                 for i in range(P.shape[1]):
-                    circle = Circle((P[0, i], P[1, i]), radius=0.0, fill=True, color='#aaaaaa', alpha=1, zorder=0.5)
+                    circle = Circle((P[0, i], P[1, i]), radius=np.sqrt(self.weights[I[i]]), fill=True, color='#aaaaaa', alpha=1, zorder=0.5)
                     ax.add_patch(circle)
                     circles.append(circle)
 
                 def update_radius(radius):
-                    for circle in circles:
-                        circle.set_radius(radius)
+                    for i in range(len(circles)):
+                        circles[i].set_radius(radius + np.sqrt(self.weights[I[i]]))
                     ax.figure.canvas.draw_idle()
 
                 radius_slider.on_changed(update_radius)
@@ -633,3 +645,9 @@ class Periodica:
         if show:
             plt.show()
         # plt.savefig('delaunay.svg')
+
+    def plot_geometry(self, TYPE, show=False, slidebar=False, use_circumcenter=True):
+        if TYPE == 'delaunay':
+            self.plot_delaunay(show=show, slidebar=slidebar)
+        else:
+            self.plot_voronoi(show=show, slidebar=slidebar, use_circumcenter=use_circumcenter)
