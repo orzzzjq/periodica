@@ -80,6 +80,14 @@ class Periodica:
             self.periodic_voronoi()
         else:
             raise Exception(f'Does not support complex type {complex_type}')
+        
+        print(f'vertex filtration:\n{self.quotient_vertex_filtration}')
+        print(f'arcs:\n')
+        for i in range(len(self.quotient_arcs)):
+            print(f'{self.quotient_arcs[i]} {self.quotient_arc_filtration[i]:.2f} {self.quotient_arc_shift[:,i]}')
+        # print(f'arcs:\n{self.quotient_arcs}')
+        # print(f'arc filtration:\n{self.quotient_arc_filtration}')
+        # print(f'arc shift:\n{self.quotient_arc_shift}')
 
     def load_point_set(self, file):
         pass
@@ -228,7 +236,7 @@ class Periodica:
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
         xticks = np.linspace(xmin, xmax, 5)[:-1]
-        print(f'xmin {xmin} xmax {xmax}')
+        # print(f'xmin {xmin} xmax {xmax}')
 
         for i in range(self.d + 1):
             axi = ax[self.d + 1 - i - 1]
