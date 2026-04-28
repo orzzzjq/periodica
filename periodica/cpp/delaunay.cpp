@@ -2,12 +2,35 @@
 #include "delaunay.h"
 
 #include <CGAL/number_utils.h>
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
 namespace DELAUNAY {
 using namespace std;
+
+struct VectorHash {
+    size_t operator()(const vector<int>& values) const {
+        size_t seed = values.size();
+        for (int value : values) {
+            seed ^= static_cast<size_t>(value) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        }
+        return seed;
+    }
+};
+
+struct CofaceIds {
+    array<int, 2> ids{0, 0};
+    int count = 0;
+
+    void add(int id) {
+        if (count < static_cast<int>(ids.size())) {
+            ids[count] = id;
+        }
+        ++count;
+    }
+};
 
 // Compute the 1-skeleton of the Delaunay triangulation
 // Input:
@@ -766,24 +789,26 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
     }
 
     // Get d-dimensional simplices
-    unordered_map<string, int> s_hashmap;
+    unordered_map<vector<int>, int, VectorHash> s_hashmap;
+    unordered_map<vector<int>, CofaceIds, VectorHash> face_to_cofaces;
     vector<vector<int>> s_vertices;
     vector<Eigen::VectorXi> s_shifts;
     vector<bool> is_canonical;
     vector<Eigen::VectorXd> voronoi_points;
     vector<double> voronoi_point_filtrations;
     
-    // Map vertices information of a simplex to a string
-    auto str = [](const vector<vector<int>>& s_info) {
-        string key;
-        key.reserve(s_info.size() * 10);
-        for (auto row : s_info) {
-            for (auto x : row) {
-                key += to_string(x);
-                key += ",";
-            }
+    auto simplexInfoKey = [d](const vector<vector<int>>& s_info) {
+        vector<int> key;
+        key.reserve(s_info.size() * static_cast<size_t>(d + 1));
+        for (const auto& row : s_info) {
+            key.insert(key.end(), row.begin(), row.end());
         }
         return key;
+    };
+
+    auto faceVertexKey = [](vector<int> vertices) {
+        sort(vertices.begin(), vertices.end());
+        return vertices;
     };
 
     // Compute necessary information of the d-simplices
@@ -813,9 +838,20 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
 
         is_canonical.push_back(is_zero);
         s_shifts.push_back(s_shift);        
-        s_hashmap.emplace(str(s_info), s_id);
+        s_hashmap.emplace(simplexInfoKey(s_info), s_id);
         s_vertices.push_back(s_verts);
         voronoi_point_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+
+        for (size_t skip = 0; skip < s_verts.size(); ++skip) {
+            vector<int> face_vertices;
+            face_vertices.reserve(s_verts.size() - 1);
+            for (size_t i = 0; i < s_verts.size(); ++i) {
+                if (i != skip) {
+                    face_vertices.push_back(s_verts[i]);
+                }
+            }
+            face_to_cofaces[faceVertexKey(std::move(face_vertices))].add(s_id);
+        }
         
         // Compute the center of the simplex, for visualization purpose
         Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
@@ -854,9 +890,10 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
             }
         }
         sort(s_info.begin(), s_info.end());
-        string key = str(s_info);
-        if (s_hashmap.find(key) != s_hashmap.end()) {
-            s_I[i] = s_hashmap[key];
+        auto key = simplexInfoKey(s_info);
+        auto it = s_hashmap.find(key);
+        if (it != s_hashmap.end()) {
+            s_I[i] = it->second;
         } else {
             s_I[i] = -1;
         }
@@ -868,21 +905,15 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
     for (auto simplex : delaunay_complex.skeleton_simplex_range(d-1)) {
         if (delaunay_complex.dimension(simplex) != d-1) continue;
 
-        vector<int> cofaces;
-        for (auto coface : delaunay_complex.cofaces_simplex_range(simplex, 1)) {
-            // coface is a d-simplex handle
-            vector<vector<int>> s_info; // the array of v_info of the vertices
-            for (auto v : delaunay_complex.simplex_vertex_range(coface)) {
-                int vi = static_cast<int>(v);
-                s_info.push_back(v_info[vi]);
-            }
-            sort(s_info.begin(), s_info.end());
-            cofaces.push_back(s_hashmap[str(s_info)]);
+        vector<int> face_vertices;
+        for (auto v : delaunay_complex.simplex_vertex_range(simplex)) {
+            face_vertices.push_back(static_cast<int>(v));
         }
 
         // The simplex should have two cofaces
-        if (cofaces.size() == 2) {
-            voronoi_edges.push_back({cofaces[0], cofaces[1]});
+        auto it = face_to_cofaces.find(faceVertexKey(std::move(face_vertices)));
+        if (it != face_to_cofaces.end() && it->second.count == 2) {
+            voronoi_edges.push_back({it->second.ids[0], it->second.ids[1]});
             voronoi_edge_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
         }
     }
