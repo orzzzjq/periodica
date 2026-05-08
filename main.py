@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # run_3d_quotient_example()
     
     # run_example(EXAMPLES['2d']['square'])
-    run_example(EXAMPLES['2d']['square'], 'voronoi')
+    # run_example(EXAMPLES['2d']['square'], 'voronoi')
     # run_example(EXAMPLES['2d']['hexagon'])
     # run_example(EXAMPLES['2d']['hexagon'], 'voronoi')
     # run_example(EXAMPLES['2d']['tunnel'])
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     # run_example(EXAMPLES['2d']['weighted'], 'voronoi')
 
     # run_example(EXAMPLES['3d']['cube'])
-    # run_example(EXAMPLES['3d']['cube'], 'voronoi')
+    run_example(EXAMPLES['3d']['cube'], 'voronoi')
     # run_example(EXAMPLES['3d']['diamond'])
     # run_example(EXAMPLES['3d']['diamond'], 'voronoi')
     # run_example(EXAMPLES['3d']['line'])

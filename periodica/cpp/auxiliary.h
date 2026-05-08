@@ -3,9 +3,9 @@
 #include <cstdio>
 #include <iostream>
 
-// #define debuging
+#define debuging
 #ifdef debuging
-#define myDebug(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__);
+#define myDebug(fmt, ...) fprintf(stderr, fmt, ##__VA_ARGS__);
 #else
 #define myDebug(fmt, ...) ;
 #endif
