@@ -30,9 +30,9 @@ def run_example(INPUT, TYPE='delaunay', show_geometry=True):
     periodica = Periodica()
     periodica.set_geometry(INPUT)
     periodica.quotient_complex(TYPE)
-    # periodica.merge_tree()
-    # periodica.print_merge_tree()
-    # periodica.plot_all_descriptors(show=(not show_geometry), same_range=False)
+    periodica.merge_tree()
+    periodica.print_merge_tree()
+    periodica.plot_all_descriptors(show=(not show_geometry), same_range=False)
     if show_geometry:
         if TYPE != 'delaunay':
             periodica.plot_geometry(TYPE, show=False, slidebar=True, use_circumcenter=False)
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     # run_3d_quotient_example()
     
     # run_example(EXAMPLES['2d']['square'])
-    # run_example(EXAMPLES['2d']['square'], 'voronoi')
+    run_example(EXAMPLES['2d']['square'], 'voronoi')
     # run_example(EXAMPLES['2d']['hexagon'])
     # run_example(EXAMPLES['2d']['hexagon'], 'voronoi')
     # run_example(EXAMPLES['2d']['tunnel'])
@@ -175,11 +175,11 @@ if __name__ == "__main__":
     # run_example(EXAMPLES['3d']['tunnel'], show_geometry=True)
     # run_example(EXAMPLES['3d']['tunnel'], 'voronoi', show_geometry=False)
 
-    N = 10
-    input = {"d" : 3, "U" : np.eye(3)}
-    input['n_points'] = N
-    input['points'] = np.random.random((3, N))
-    # print(input['points'])
-    # run_example(input, 'delaunay', show_geometry=False)
-    print(f'{N} points in unit cell')
-    run_example(input, 'voronoi', show_geometry=False)
+    # N = 50
+    # input = {"d" : 3, "U" : np.eye(3)}
+    # input['n_points'] = N
+    # input['points'] = np.random.random((3, N))
+    # # print(input['points'])
+    # # run_example(input, 'delaunay', show_geometry=False)
+    # print(f'{N} points in unit cell')
+    # run_example(input, 'voronoi', show_geometry=False)
