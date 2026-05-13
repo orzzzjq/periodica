@@ -311,12 +311,12 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 			if (beams[rOldId].back().ratio() < vol_p * inputVolumeInv + 1e-8 && beams[rOldId].back().exponent() == d - p) continue;
 			beams[rOldId].push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
-			auto v = L.basis();
-			int inf_norm = 0;
-			for (int i = 0; i < v.rows(); ++i) {
-				inf_norm = max(inf_norm, abs(v(i,0)));
-			}
-			if (inf_norm <= 2) {
+			// auto v = L.basis();
+			// int inf_norm = 0;
+			// for (int i = 0; i < v.rows(); ++i) {
+			// 	inf_norm = max(inf_norm, abs(v(i,0)));
+			// }
+			// if (inf_norm <= 2) {
 			printf("\n** catenation %d -> %d\n", x, y);
 			cout << "time: " << time << endl;
 			cout << "shift:\n" << a.shift() << endl;
@@ -324,7 +324,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
 			cout << "monomial: " << beams[rOldId][beams[rOldId].size() - 2].toString() << " -> " << beams[rOldId].back().toString() << endl;
-			}
+			// }
 #endif
 		}
 		else { // merger
