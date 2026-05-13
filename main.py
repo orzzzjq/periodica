@@ -31,8 +31,8 @@ def run_example(INPUT, TYPE='delaunay', show_geometry=True):
     periodica.set_geometry(INPUT)
     periodica.quotient_complex(TYPE)
     periodica.merge_tree()
-    periodica.print_merge_tree()
-    periodica.plot_all_descriptors(show=(not show_geometry), same_range=False)
+    # periodica.print_merge_tree()
+    # periodica.plot_all_descriptors(show=(not show_geometry), same_range=False)
     if show_geometry:
         if TYPE != 'delaunay':
             periodica.plot_geometry(TYPE, show=False, slidebar=True, use_circumcenter=False)
@@ -44,12 +44,12 @@ EXAMPLES = {
     "square" : {
         "d" : 2,
         "U" : np.eye(2),
-        "n_points" : 4,
+        "n_points" : 1,
         "points" : np.array([
-            [0, 0],
+            # [0, 0],
             [0.5, 0.5],
-            [0.5, 0],
-            [0, 0.5]
+            # [0.5, 0],
+            # [0, 0.5]
         ]).T
     },
     "weighted" : {

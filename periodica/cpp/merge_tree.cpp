@@ -224,6 +224,7 @@ public:
 	int source() { return _source; }
 	int target() { return _target; }
 	Vector shift() const { return _shift; }
+	void negateShift() { _shift = -_shift; }
 };
 
 
@@ -285,11 +286,12 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 	// sort the arcs in non-decreasing order
 	std::sort(begin(arcs), end(arcs), filtrationComparator());
 
-	myDebug("Sorted filtration:\n");
-	for (auto a : arcs) {
-		myDebug("%.3f ", a.filtration());
-	}
-	myDebug("\n");
+	// myDebug("Sorted filtration:\n");
+	// for (auto a : arcs) {
+	// 	myDebug("%.3f ", a.filtration());
+	// }
+	// myDebug("\n");
+	// cout << "input basis:\n" << inputBasis << endl;
 
 	// union-find algorithm for PMT
 	int x, y, r, s, z, last, p, rOldId, sOldId;
@@ -301,27 +303,31 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 		rOldId = vertices[r].oldId(), sOldId = vertices[s].oldId();
 		if (r == s) { // catenation
 			if (beams[rOldId].back().ratio() == 1.0 && beams[rOldId].back().exponent() == 0) continue;
-#ifdef debuging
-			printf("\n** catenation %d -> %d\n", x, y);
-#endif
 			Lattice<integer> L(vertices[x].drift() + a.shift() - vertices[y].drift());
 			vertices[r].lattice() += L;
 			// compute shadow monomial, insert new event
 			p = vertices[r].lattice().size();
 			vol_p = Volume(inputBasis, vertices[r].lattice());
+			if (beams[rOldId].back().ratio() < vol_p * inputVolumeInv + 1e-8 && beams[rOldId].back().exponent() == d - p) continue;
 			beams[rOldId].push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
+			auto v = L.basis();
+			int inf_norm = 0;
+			for (int i = 0; i < v.rows(); ++i) {
+				inf_norm = max(inf_norm, abs(v(i,0)));
+			}
+			if (inf_norm <= 2) {
+			printf("\n** catenation %d -> %d\n", x, y);
 			cout << "time: " << time << endl;
+			cout << "shift:\n" << a.shift() << endl;
 			cout << "v:\n" << L.basis() << endl;
 			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
 			cout << "vol_p: " << vol_p << endl;
-			cout << "monomial: " << beams[rOldId].back().toString() << endl;
+			cout << "monomial: " << beams[rOldId][beams[rOldId].size() - 2].toString() << " -> " << beams[rOldId].back().toString() << endl;
+			}
 #endif
 		}
 		else { // merger
-#ifdef debuging
-			printf("\n** merger %d -> %d\n", x, y);
-#endif
 			// record index of oldest vertex in both components
 			if (vertices[r].old() > vertices[s].old()) {
 				swap(rOldId, sOldId);
@@ -330,6 +336,7 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 			if (vertices[r].size() < vertices[s].size()) {
 				swap(r, s);
 				swap(x, y);
+				a.negateShift();
 			}
 			if (vertices[r].old() > vertices[s].old()) {
 				vertices[r].old() = vertices[s].old();
@@ -353,12 +360,14 @@ void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vec
 			vol_p = Volume(inputBasis, vertices[r].lattice());
 			beams[rOldId].push_back(Event(time, sOldId, vol_p * inputVolumeInv, d - p));
 #ifdef debuging
-			cout << "time: " << time << endl;
-			cout << "v:\n" << v << endl;
-			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
-			cout << "vol_p: " << vol_p << endl;
-			cout << "merge " << vertices[s].oldId() << " -> " << vertices[r].oldId() << endl;
-			cout << "monomial: " << beams[rOldId].back().toString() << endl;
+			// printf("\n** merger %d -> %d\n", x, y);
+			// cout << "time: " << time << endl;
+			// cout << "shift:\n" << a.shift() << endl;
+			// cout << "v:\n" << v << endl;
+			// cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
+			// cout << "vol_p: " << vol_p << endl;
+			// cout << "merge " << vertices[s].oldId() << " -> " << vertices[r].oldId() << endl;
+			// cout << "monomial: " << beams[rOldId][beams[rOldId].size() - 2].toString() << " -> " << beams[rOldId].back().toString() << endl;
 #endif
 		}
 	}
