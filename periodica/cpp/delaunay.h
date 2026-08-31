@@ -53,7 +53,7 @@ std::tuple<Eigen::MatrixXd, Eigen::VectorXi, Eigen::MatrixXi> pointsIn3xDomain(
     const Eigen::VectorXd& b, 
     const Eigen::MatrixXd& canonical_points);
 
-std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
+std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi, Eigen::VectorXi> periodicDelaunay(
     const Eigen::MatrixXd& U,
     const Eigen::MatrixXd& points,
     const Eigen::VectorXd& weights);

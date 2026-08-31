@@ -562,7 +562,10 @@ std::tuple<Eigen::MatrixXd, Eigen::VectorXi, Eigen::MatrixXi> pointsIn3xDomain(
 //  Delaunay edges: MatrixXi(m, 2)
 //  Filtration values: VectorXd(m)
 //  Shift vectors: MatrixXi(d, m)
-std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
+//  Kept points: VectorXi(n') -- original indices of the points that appear in the
+//  weighted triangulation; points hidden by larger weights are excluded, and edge
+//  endpoints are remapped to [0, n')
+std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi, Eigen::VectorXi> periodicDelaunay(
     const Eigen::MatrixXd& U,       // lattice basis
     const Eigen::MatrixXd& points,  // points in unit cell
     const Eigen::VectorXd& weights  // weights of points in unit cell
@@ -594,6 +597,25 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
 
     // Weighted Delaunay complex from points in the 3x domain
     Gudhi::Simplex_tree<> complex = DelaunayComplex(working_points, working_weights);
+
+    // Weighted (regular) triangulations may hide a point whose power cell is empty;
+    // a hidden point never appears as a vertex of the complex. Detect the canonical
+    // points that survive and remap the surviving indices to [0, n').
+    vector<char> point_present(n, 0);
+    for (auto simplex : complex.skeleton_simplex_range(0)) {
+        for (auto v : complex.simplex_vertex_range(simplex)) {
+            int id = static_cast<int>(v);
+            if (id < n) point_present[id] = 1;
+        }
+    }
+    vector<int> remap(n, -1);
+    vector<int> kept_ids;
+    for (int i = 0; i < n; ++i) {
+        if (point_present[i]) {
+            remap[i] = static_cast<int>(kept_ids.size());
+            kept_ids.push_back(i);
+        }
+    }
 
     vector<vector<int>> delaunay_edges;
     vector<double> e_filtrations;
@@ -635,6 +657,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
         int s = delaunay_edges[i][0], t = delaunay_edges[i][1];
         if (s < n || t < n) {
             if (s > t) swap(s, t); // let the first point be the one with smaller index
+            if (remap[I(s)] < 0 || remap[I(t)] < 0) continue; // edge touches a hidden point
             if (t >= n && s > I(t)) continue;
             if (s == I(t)) { // If it's a self-loop, check if the opposite direction is already inserted
                 string shift_key, opposite_key;
@@ -665,18 +688,23 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi> periodicDelaunay(
     Eigen::MatrixXi shift(d, M);
 
     for (int i = 0; i < M; ++i) {
-        // edge with original index
+        // edge with remapped index of the surviving points
         auto [s, t] = quotient_edges[i];
-        edges(i, 0) = I(s);
-        edges(i, 1) = I(t);
-        
+        edges(i, 0) = remap[I(s)];
+        edges(i, 1) = remap[I(t)];
+
         filtration(i) = quotient_filtrations[i];
 
         // shift vector
         shift.col(i) = S.col(t);
     }
 
-    return {edges, filtration, shift};
+    Eigen::VectorXi kept(static_cast<int>(kept_ids.size()));
+    for (int i = 0; i < kept.size(); ++i) {
+        kept(i) = kept_ids[i];
+    }
+
+    return {edges, filtration, shift, kept};
 }
 
 Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {

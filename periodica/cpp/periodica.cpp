@@ -31,8 +31,10 @@ PYBIND11_MODULE(_periodica, m) {
    m.def("points_in_3x_domain", &DELAUNAY::pointsIn3xDomain, 
         "Compute the periodic points in the 3X Dirichlet domain",
         py::arg("V"), py::arg("A"), py::arg("b"), py::arg("canonical_points"));
-   m.def("periodic_delaunay", &DELAUNAY::periodicDelaunay, 
-        "Compute quotient complex from periodic Delaunay complex",
+   m.def("periodic_delaunay", &DELAUNAY::periodicDelaunay,
+        "Compute quotient complex from periodic Delaunay complex. Returns (edges, filtration, shift, kept), "
+        "where kept holds the original indices of the points that appear in the weighted triangulation; "
+        "points hidden by larger weights are dropped and edge endpoints are remapped accordingly",
         py::arg("U"), py::arg("points"), py::arg("weights"));
    m.def("periodic_voronoi", &DELAUNAY::periodicVoronoi, 
         "Compute quotient complex from periodic Voronoi complex",

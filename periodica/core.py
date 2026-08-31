@@ -55,9 +55,17 @@ class Periodica:
             raise Exception('weights length must equal number of points')
         self.weights = weights
         self.V = _periodica.reduced_basis(self.U)    # reduced basis
-        self.n_quotient_vertices = self.n_points
-        self.quotient_vertex_filtration = -np.sqrt(self.weights)
-        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift = _periodica.periodic_delaunay(self.U, self.points, self.weights)
+        self.quotient_arcs, self.quotient_arc_filtration, self.quotient_arc_shift, kept = \
+            _periodica.periodic_delaunay(self.U, self.points, self.weights)
+        # Points hidden by larger weights are absent from the weighted triangulation
+        # and contribute nothing to the filtration; the backend drops them and
+        # remaps the arc endpoints to the surviving points.
+        self.kept_points = np.asarray(kept, dtype=int).reshape(-1)
+        self.hidden_points = sorted(set(range(self.n_points)) - set(self.kept_points))
+        if self.hidden_points:
+            print(f'[WARNING] {len(self.hidden_points)} hidden point(s) dropped from weighted Delaunay: {self.hidden_points}')
+        self.n_quotient_vertices = len(self.kept_points)
+        self.quotient_vertex_filtration = -np.sqrt(self.weights[self.kept_points])
 
     @timing
     def periodic_voronoi(self):
