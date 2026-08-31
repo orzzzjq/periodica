@@ -1,3 +1,4 @@
+import { usePanelStore } from '../panelStore'
 import { PRESETS } from '../presets'
 import { useStore } from '../store'
 
@@ -146,6 +147,10 @@ export default function ControlPanel() {
             {results.points.hidden.join(', ')}
           </div>
         )}
+      </section>
+
+      <section>
+        <button onClick={() => usePanelStore.getState().resetLayout()}>reset panel layout</button>
       </section>
     </div>
   )

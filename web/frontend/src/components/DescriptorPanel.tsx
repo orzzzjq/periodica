@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout } from 'plotly.js'
 import createPlotlyComponent from 'react-plotly.js/factory'
@@ -246,34 +246,40 @@ function ImagePlots({ results, sameRange }: { results: ComputeResponse; sameRang
   )
 }
 
-export default function DescriptorPanel() {
+// Standalone panel bodies for the floating-panel system.
+
+export function BarcodePanel() {
+  const results = useStore((s) => s.results)
+  if (!results) return <div className="plots" />
+  return (
+    <div className="plots">
+      <BarcodePlots results={results} />
+    </div>
+  )
+}
+
+export function DiagramPanel() {
+  const results = useStore((s) => s.results)
+  if (!results) return <div className="plots" />
+  return (
+    <div className="plots">
+      <DiagramPlots results={results} />
+    </div>
+  )
+}
+
+export function ImagePanel() {
   const results = useStore((s) => s.results)
   const sameRange = useStore((s) => s.ui.sameRange)
   const setUi = useStore((s) => s.setUi)
-  const [tab, setTab] = useState<'barcode' | 'diagram' | 'image'>('barcode')
-
-  if (!results) return <div className="descriptors" />
-
+  if (!results) return <div className="plots" />
   return (
-    <div className="descriptors">
-      <div className="tabs">
-        {(['barcode', 'diagram', 'image'] as const).map((t) => (
-          <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
-            {t}
-          </button>
-        ))}
-        {tab === 'image' && (
-          <label className="row">
-            <input type="checkbox" checked={sameRange} onChange={(e) => setUi({ sameRange: e.target.checked })} />
-            shared range
-          </label>
-        )}
-      </div>
-      <div className="plots">
-        {tab === 'barcode' && <BarcodePlots results={results} />}
-        {tab === 'diagram' && <DiagramPlots results={results} />}
-        {tab === 'image' && <ImagePlots results={results} sameRange={sameRange} />}
-      </div>
+    <div className="plots">
+      <label className="row image-options">
+        <input type="checkbox" checked={sameRange} onChange={(e) => setUi({ sameRange: e.target.checked })} />
+        shared range
+      </label>
+      <ImagePlots results={results} sameRange={sameRange} />
     </div>
   )
 }

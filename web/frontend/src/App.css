@@ -1,16 +1,120 @@
-.app {
-  display: grid;
-  grid-template-columns: 300px 1fr 440px;
-  height: 100vh;
+/* ---- floating panel system ---- */
+.panel-host {
+  position: fixed;
+  inset: 0;
+  background: #e8e8e8;
   overflow: hidden;
+}
+
+.panel-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #c4c4c4;
+  border-radius: 6px;
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.panel-window.drop-target {
+  outline: 2px solid #2255cc;
+  outline-offset: -2px;
+}
+
+.panel-header {
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  flex: 0 0 32px;
+  background: #f0f0f0;
+  border-bottom: 1px solid #d8d8d8;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.panel-header:active {
+  cursor: grabbing;
+}
+
+.panel-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tab {
+  border: none;
+  border-right: 1px solid #d8d8d8;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 14px;
+  font-size: 12px;
+  color: #555;
+  cursor: grab;
+  touch-action: none;
+}
+
+.tab.active {
+  background: #fff;
+  color: #111;
+  font-weight: 600;
+}
+
+.win-btn {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  width: 32px;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+}
+
+.win-btn:hover {
+  background: #e0e0e0;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel-content-holder {
+  height: 100%;
+  overflow: auto;
+}
+
+.resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, #bbb 50%, #bbb 60%, transparent 60%, transparent 70%, #bbb 70%, #bbb 80%, transparent 80%);
+}
+
+.tab-ghost {
+  position: fixed;
+  z-index: 99999;
+  padding: 4px 12px;
+  background: #2255cc;
+  color: #fff;
+  font-size: 12px;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0.85;
 }
 
 /* ---- control panel ---- */
 .panel {
   padding: 12px 16px;
-  overflow-y: auto;
-  border-right: 1px solid #ddd;
-  background: #fafafa;
 }
 
 .panel h1 {
@@ -111,11 +215,11 @@ button:disabled {
   font-size: 12px;
 }
 
-/* ---- scene ---- */
-.scene-column {
+/* ---- scene panel ---- */
+.scene-panel {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  height: 100%;
 }
 
 .scene {
@@ -138,6 +242,7 @@ button:disabled {
   padding: 10px 20px;
   border-top: 1px solid #ddd;
   font-size: 13px;
+  flex: 0 0 auto;
 }
 
 .slider-row span {
@@ -149,43 +254,17 @@ button:disabled {
   flex: 1;
 }
 
-/* ---- descriptors ---- */
-.descriptors {
-  border-left: 1px solid #ddd;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-
-.tabs {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid #eee;
-  position: sticky;
-  top: 0;
-  background: #fff;
-  z-index: 2;
-}
-
+/* ---- descriptor panels ---- */
 .plots {
   padding: 4px 8px;
+}
+
+.image-options {
+  justify-content: flex-end;
+  padding: 2px 8px 0;
 }
 
 .square-plot {
   display: flex;
   justify-content: center;
-}
-
-@media (max-width: 1100px) {
-  .app {
-    grid-template-columns: 280px 1fr;
-    grid-template-rows: 1fr 1fr;
-  }
-  .descriptors {
-    grid-column: 1 / -1;
-    border-left: none;
-    border-top: 1px solid #ddd;
-  }
 }

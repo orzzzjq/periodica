@@ -53,7 +53,7 @@ await shot('slider-r035')
 // descriptor tabs on the 2D weighted preset
 await page.selectOption('select', { label: '2D weighted' })
 await settle()
-for (const tab of ['diagram', 'image']) {
+for (const tab of ['Diagram', 'Image']) {
   await page.getByRole('button', { name: tab, exact: true }).click()
   await settle(900)
   await shot(`tab-${tab}`)
