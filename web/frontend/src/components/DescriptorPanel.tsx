@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout } from 'plotly.js'
 import createPlotlyComponent from 'react-plotly.js/factory'
@@ -86,13 +86,14 @@ function baseLayout(i: number, xmin: number, xmax: number): Partial<Layout> {
 // A genuinely square plot region with identical x/y ranges — equal aspect
 // without scaleanchor (which would otherwise widen the x range to fill the
 // panel width). Used by the diagram and image panels.
-const SQUARE = 250
+const SQ_MIN = 175 // 70% of the original 250px
+const SQ_MAX = 360
 const SQ_MARGIN = { l: 46, t: 8, b: 34 }
 
-function squareLayout(i: number, xmin: number, xmax: number, rightMargin = 12): Partial<Layout> {
+function squareLayout(i: number, xmin: number, xmax: number, size: number, rightMargin = 12): Partial<Layout> {
   return {
-    width: SQ_MARGIN.l + SQUARE + rightMargin,
-    height: SQ_MARGIN.t + SQUARE + SQ_MARGIN.b,
+    width: SQ_MARGIN.l + size + rightMargin,
+    height: SQ_MARGIN.t + size + SQ_MARGIN.b,
     margin: { l: SQ_MARGIN.l, r: rightMargin, t: SQ_MARGIN.t, b: SQ_MARGIN.b },
     xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
     yaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
@@ -100,6 +101,30 @@ function squareLayout(i: number, xmin: number, xmax: number, rightMargin = 12): 
     annotations: monomialLabel(i),
     shapes: BORDER,
   }
+}
+
+// Square size that makes the panel's d+1 plots fill the hosting panel's
+// height (with a lower bound), and never overflow its width. `extraTop`
+// accounts for content above the plots (e.g. the shared-range row).
+function useSquareSize(nPlots: number, rightMargin: number, extraTop = 0) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState(SQ_MIN)
+  useEffect(() => {
+    const holder = ref.current?.parentElement // the panel-content-holder
+    if (!holder) return
+    const recompute = () => {
+      const availH = holder.clientHeight - extraTop - 10
+      const availW = holder.clientWidth - SQ_MARGIN.l - rightMargin - 14
+      const byHeight = Math.floor(availH / nPlots) - SQ_MARGIN.t - SQ_MARGIN.b
+      const s = Math.min(byHeight, availW, SQ_MAX)
+      setSize(Math.max(SQ_MIN, s))
+    }
+    recompute()
+    const obs = new ResizeObserver(recompute)
+    obs.observe(holder)
+    return () => obs.disconnect()
+  }, [nPlots, rightMargin, extraTop])
+  return { ref, size }
 }
 
 function BarcodePlots({ results }: { results: ComputeResponse }) {
@@ -147,7 +172,7 @@ function BarcodePlots({ results }: { results: ComputeResponse }) {
   )
 }
 
-function DiagramPlots({ results }: { results: ComputeResponse }) {
+function DiagramPlots({ results, size }: { results: ComputeResponse; size: number }) {
   const [xmin, xmax] = xRange(results.barcodes, 0.12, 0.12)
   const dims = [...results.barcodes.keys()].reverse()
   return (
@@ -191,7 +216,7 @@ function DiagramPlots({ results }: { results: ComputeResponse }) {
             hovertext: infinite.map((b) => `(${b.birth.toFixed(3)}, ∞) × ${b.multiplicity.toFixed(3)}`),
           })
         }
-        const layout = squareLayout(i, xmin, xmax)
+        const layout = squareLayout(i, xmin, xmax, size)
         return (
           <div key={i} className="square-plot">
             <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
@@ -202,11 +227,11 @@ function DiagramPlots({ results }: { results: ComputeResponse }) {
   )
 }
 
-function ImagePlots({ results, sameRange }: { results: ComputeResponse; sameRange: boolean }) {
-  const { xmin, xmax, data, size } = results.images
+function ImagePlots({ results, sameRange, size }: { results: ComputeResponse; sameRange: boolean; size: number }) {
+  const { xmin, xmax, data, size: gridSize } = results.images
   const axis = useMemo(
-    () => Array.from({ length: size }, (_, k) => xmin + ((k + 0.5) / size) * (xmax - xmin)),
-    [xmin, xmax, size],
+    () => Array.from({ length: gridSize }, (_, k) => xmin + ((k + 0.5) / gridSize) * (xmax - xmin)),
+    [xmin, xmax, gridSize],
   )
   const globalRange = useMemo(() => {
     let m = 0
@@ -235,7 +260,7 @@ function ImagePlots({ results, sameRange }: { results: ComputeResponse; sameRang
             showscale: !sameRange,
           },
         ]
-        const layout = squareLayout(i, xmin, xmax, sameRange ? 12 : 74)
+        const layout = squareLayout(i, xmin, xmax, size, sameRange ? 12 : 74)
         return (
           <div key={i} className="square-plot">
             <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
@@ -260,10 +285,10 @@ export function BarcodePanel() {
 
 export function DiagramPanel() {
   const results = useStore((s) => s.results)
-  if (!results) return <div className="plots" />
+  const { ref, size } = useSquareSize((results?.d ?? 2) + 1, 12)
   return (
-    <div className="plots">
-      <DiagramPlots results={results} />
+    <div className="plots" ref={ref}>
+      {results && <DiagramPlots results={results} size={size} />}
     </div>
   )
 }
@@ -272,14 +297,14 @@ export function ImagePanel() {
   const results = useStore((s) => s.results)
   const sameRange = useStore((s) => s.ui.sameRange)
   const setUi = useStore((s) => s.setUi)
-  if (!results) return <div className="plots" />
+  const { ref, size } = useSquareSize((results?.d ?? 2) + 1, sameRange ? 12 : 74, 26)
   return (
-    <div className="plots">
+    <div className="plots" ref={ref}>
       <label className="row image-options">
         <input type="checkbox" checked={sameRange} onChange={(e) => setUi({ sameRange: e.target.checked })} />
         shared range
       </label>
-      <ImagePlots results={results} sameRange={sameRange} />
+      {results && <ImagePlots results={results} sameRange={sameRange} size={size} />}
     </div>
   )
 }

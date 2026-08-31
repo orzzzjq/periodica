@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  APP_BAR_H,
   HEADER_H,
   PANEL_IDS,
   PANEL_TITLES,
@@ -11,13 +12,15 @@ import {
 
 // Hit-test a viewport point against the other groups (store rects, not DOM,
 // so the window being dragged never occludes the target). Returns the
-// topmost matching group id.
-function hitTest(x: number, y: number, exclude: string, headerOnly: boolean): string | null {
+// topmost matching group id. Group coordinates are host-relative; the host
+// sits below the app bar.
+function hitTest(x: number, clientY: number, exclude: string, headerOnly: boolean): string | null {
+  const y = clientY - APP_BAR_H
   const groups = usePanelStore.getState().groups
   let best: PanelGroup | null = null
   for (const g of Object.values(groups)) {
-    if (g.id === exclude) continue
-    const h = headerOnly ? HEADER_H : g.minimized ? HEADER_H : g.h
+    if (g.id === exclude || g.minimized) continue // minimized groups live in the app bar
+    const h = headerOnly ? HEADER_H : g.h
     const inside = x >= g.x && x <= g.x + g.w && y >= g.y && y <= g.y + h
     if (inside && (!best || g.z > best.z)) best = g
   }
@@ -71,7 +74,7 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
       if (el.parentElement !== body) body.appendChild(el)
       el.style.display = id === group.active ? '' : 'none'
     }
-  }, [group.tabs, group.active, holders])
+  })
 
   // Let width-tracking Plotly plots (useResizeHandler) follow panel resizes.
   useEffect(() => {
@@ -130,7 +133,7 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
         const target = hitTest(ev.clientX, ev.clientY, '', false)
         if (target === group.id) return
         if (target) moveTab(group.id, panel, target)
-        else detachTab(group.id, panel, ev.clientX - 60, ev.clientY - HEADER_H / 2)
+        else detachTab(group.id, panel, ev.clientX - 60, ev.clientY - APP_BAR_H - HEADER_H / 2)
       },
     )
   }
@@ -147,10 +150,12 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
     )
   }
 
+  if (group.minimized) return null // shown as an app-bar chip instead
+
   return (
     <div
-      className={`panel-window${group.minimized ? ' minimized' : ''}${isDropTarget ? ' drop-target' : ''}`}
-      style={{ left: group.x, top: group.y, width: group.w, height: group.minimized ? HEADER_H : group.h, zIndex: group.z }}
+      className={`panel-window${isDropTarget ? ' drop-target' : ''}`}
+      style={{ left: group.x, top: group.y, width: group.w, height: group.h, zIndex: group.z }}
       onPointerDown={() => bringToFront(group.id)}
       data-group-id={group.id}
       data-tabs={group.tabs.join(',')}
@@ -167,16 +172,12 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
             </button>
           ))}
         </div>
-        <button
-          className="win-btn"
-          title={group.minimized ? 'restore' : 'minimize'}
-          onClick={() => toggleMinimize(group.id)}
-        >
-          {group.minimized ? '▢' : '—'}
+        <button className="win-btn" title="minimize to app bar" onClick={() => toggleMinimize(group.id)}>
+          —
         </button>
       </div>
-      <div className="panel-body" ref={bodyRef} hidden={group.minimized} />
-      {!group.minimized && <div className="resize-handle" onPointerDown={onResizePointerDown} />}
+      <div className="panel-body" ref={bodyRef} />
+      <div className="resize-handle" onPointerDown={onResizePointerDown} />
       {ghost &&
         createPortal(
           <div className="tab-ghost" style={{ left: ghost.x + 8, top: ghost.y + 8 }}>
@@ -205,12 +206,29 @@ export default function PanelHost({ contents }: { contents: Record<PanelId, Reac
     return map
   }, [])
 
+  const restore = usePanelStore((s) => s.restore)
+  const minimized = Object.values(groups)
+    .filter((g) => g.minimized)
+    .sort((a, b) => a.id.localeCompare(b.id))
+
   return (
-    <div className="panel-host">
-      {Object.values(groups).map((g) => (
-        <GroupWindow key={g.id} group={g} holders={holders} />
-      ))}
-      {PANEL_IDS.map((id) => createPortal(contents[id], holders[id]))}
-    </div>
+    <>
+      <div className="app-bar">
+        <span className="app-brand">Periodica</span>
+        <div className="app-bar-chips">
+          {minimized.map((g) => (
+            <button key={g.id} className="chip" title="restore" onClick={() => restore(g.id)}>
+              {g.tabs.map((t) => PANEL_TITLES[t]).join(' · ')}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="panel-host">
+        {Object.values(groups).map((g) => (
+          <GroupWindow key={g.id} group={g} holders={holders} />
+        ))}
+        {PANEL_IDS.map((id) => createPortal(contents[id], holders[id]))}
+      </div>
+    </>
   )
 }

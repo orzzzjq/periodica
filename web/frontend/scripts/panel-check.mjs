@@ -43,18 +43,19 @@ if (Math.abs(input1.x - input0.x - 300) > 20 || Math.abs(input1.y - input0.y - 7
   problems.push(`input window did not move as expected: ${JSON.stringify({ input0, input1 })}`)
 else console.log('drag window: OK')
 
-// 2. minimize / restore the scene window
-const scene = page.locator(windowWithTab('scene'))
-await scene.locator('.win-btn').click()
+// 2. minimize the scene window into the app bar, restore via its chip
+await page.locator(windowWithTab('scene')).locator('.win-btn').click()
 await page.waitForTimeout(200)
-const minimizedH = (await rectOf(windowWithTab('scene'))).height
-if (minimizedH > 40) problems.push(`scene not minimized (height ${minimizedH})`)
-else console.log('minimize: OK')
+const sceneHidden = (await page.locator(windowWithTab('scene')).count()) === 0
+const chip = page.locator('.app-bar .chip', { hasText: 'Visualization' })
+if (!sceneHidden || (await chip.count()) !== 1) problems.push('scene not minimized into app bar')
+else console.log('minimize to app bar: OK')
 await page.screenshot({ path: `${OUT}/panel-minimized.png` })
-await scene.locator('.win-btn').click()
-await page.waitForTimeout(200)
-if ((await rectOf(windowWithTab('scene'))).height < 100) problems.push('scene did not restore')
-else console.log('restore: OK')
+await chip.click()
+await page.waitForTimeout(300)
+const restored = (await page.locator(windowWithTab('scene') + ' canvas').count()) > 0
+if (!restored || (await chip.count()) !== 0) problems.push('scene did not restore from chip')
+else console.log('restore from chip: OK')
 
 const dumpGroups = async (label) => {
   const tabs = await page.locator('.panel-window').evaluateAll((els) =>

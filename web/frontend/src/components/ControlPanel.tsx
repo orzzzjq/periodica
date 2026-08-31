@@ -43,8 +43,6 @@ export default function ControlPanel() {
 
   return (
     <div className="panel">
-      <h1>Periodica</h1>
-
       <section>
         <label className="row">
           Preset{' '}

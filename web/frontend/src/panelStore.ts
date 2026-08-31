@@ -13,6 +13,7 @@ export const PANEL_TITLES: Record<PanelId, string> = {
 }
 
 export const HEADER_H = 32
+export const APP_BAR_H = 36
 const MIN_W = 220
 const MIN_H = 140
 const STORAGE_KEY = 'periodica-panels-v1'
@@ -37,6 +38,7 @@ interface PanelState {
   moveGroup: (gid: string, x: number, y: number) => void
   resizeGroup: (gid: string, w: number, h: number) => void
   toggleMinimize: (gid: string) => void
+  restore: (gid: string) => void
   setActive: (gid: string, panel: PanelId) => void
   setDropTarget: (gid: string | null) => void
   mergeGroups: (src: string, dst: string) => void
@@ -50,13 +52,13 @@ const newId = () => `g${Date.now().toString(36)}-${idCounter++}`
 
 function clampPos(x: number, y: number, w: number): [number, number] {
   const vw = window.innerWidth
-  const vh = window.innerHeight
+  const vh = window.innerHeight - APP_BAR_H
   return [Math.min(Math.max(x, -w + 80), vw - 60), Math.min(Math.max(y, 0), vh - HEADER_H)]
 }
 
 function defaultLayout(): Record<string, PanelGroup> {
   const vw = Math.max(window.innerWidth, 900)
-  const vh = Math.max(window.innerHeight, 500)
+  const vh = Math.max(window.innerHeight - APP_BAR_H, 500)
   const descW = 440
   const inputW = 300
   const gap = 10
@@ -160,6 +162,18 @@ export const usePanelStore = create<PanelState>((set, get) => {
       update((gs) => {
         if (gs[gid]) gs[gid].minimized = !gs[gid].minimized
       }),
+
+    restore: (gid) => {
+      const z = get().zTop + 1
+      set({ zTop: z })
+      update((gs) => {
+        const g = gs[gid]
+        if (g) {
+          g.minimized = false
+          g.z = z
+        }
+      })
+    },
 
     setActive: (gid, panel) =>
       update((gs) => {
