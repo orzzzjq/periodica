@@ -10,6 +10,13 @@
 namespace DELAUNAY {
 using namespace std;
 
+// Weighted alpha filtration values are power values and can be negative for
+// large weights; the radius-scale filtration is the signed square root
+// (matching the -sqrt(w) vertex convention). A plain sqrt would produce NaN.
+static double signedSqrt(double a) {
+    return a >= 0 ? sqrt(a) : -sqrt(-a);
+}
+
 struct VectorHash {
     size_t operator()(const vector<int>& values) const {
         size_t seed = values.size();
@@ -645,7 +652,7 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi, Eigen::VectorXi> p
                 id.push_back(int(v));
             }
             delaunay_edges.push_back(id);
-            e_filtrations.push_back(sqrt(complex.filtration(simplex)));
+            e_filtrations.push_back(signedSqrt(complex.filtration(simplex)));
         }
     }
 
@@ -868,7 +875,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         s_shifts.push_back(s_shift);        
         s_hashmap.emplace(simplexInfoKey(s_info), s_id);
         s_vertices.push_back(s_verts);
-        voronoi_point_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+        voronoi_point_filtrations.push_back(-signedSqrt(delaunay_complex.filtration(simplex)));
 
         for (size_t skip = 0; skip < s_verts.size(); ++skip) {
             vector<int> face_vertices;
@@ -942,7 +949,7 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         auto it = face_to_cofaces.find(faceVertexKey(std::move(face_vertices)));
         if (it != face_to_cofaces.end() && it->second.count == 2) {
             voronoi_edges.push_back({it->second.ids[0], it->second.ids[1]});
-            voronoi_edge_filtrations.push_back(-sqrt(delaunay_complex.filtration(simplex)));
+            voronoi_edge_filtrations.push_back(-signedSqrt(delaunay_complex.filtration(simplex)));
         }
     }
 

@@ -91,6 +91,25 @@ def test_2d_unweighted_control():
     check_hidden_case('2d unweighted control', 2, points, [0.0, 0.0], expected_hidden=[])
 
 
+def test_large_weight_negative_filtration():
+    # A weight large enough that some weighted alpha values are negative
+    # (e.g. two copies of a w=0.5 point at distance 1: alpha = 0.25 - 0.5).
+    # The filtration must use a signed sqrt, never producing NaN. Point 0
+    # is also hidden here (dist^2 = 0.04 <= 0.5).
+    points = np.array([
+        [0.5, 0.5],
+        [0.3, 0.5],
+    ]).T
+    p = build(2, points, [0.0, 0.5])
+    assert p.hidden_points == [0], f'expected point 0 hidden, got {p.hidden_points}'
+    filt = np.asarray(p.quotient_arc_filtration)
+    assert not np.isnan(filt).any(), f'NaN in arc filtrations: {filt}'
+    assert (filt < 0).any(), 'expected some negative (signed-sqrt) filtration values'
+    n_inf = count_infinite_bars(p)
+    assert n_inf == 1, f'expected exactly 1 infinite bar, got {n_inf}'
+    print('PASS large weight (negative alpha, signed sqrt)')
+
+
 def test_plot_delaunay_arc_positions():
     # Point 0 is hidden by point 1, so kept_points == [1] and the arc-endpoint
     # remap is non-identity: drawing arcs with P[:, s] instead of
@@ -136,6 +155,7 @@ if __name__ == '__main__':
     test_2d_hidden_point()
     test_3d_hidden_point()
     test_2d_unweighted_control()
+    test_large_weight_negative_filtration()
     test_plot_delaunay_arc_positions()
     test_quotient_file_regression()
     print('All hidden-point tests passed.')

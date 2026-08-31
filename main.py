@@ -55,15 +55,15 @@ EXAMPLES = {
     "weighted" : {
         "d" : 2,
         "U" : np.eye(2),
-        "n_points" : 4,
+        "n_points" : 2,
         "points" : np.array([
-            [0, 0],
+            # [0, 0],
             [0.5, 0.5],
-            [0.5, 0],
-            [0, 0.5]
+            # [0.5, 0],
+            [0.3, 0.5]
         ]).T,
         "weights" : np.array([
-            0.04, 0, 0, 0
+            0.1, 0 #, 0, 0
         ])
     },
     "hexagon" : {
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     # run_2d_quotient_example_2()
     # run_3d_quotient_example()
     
-    run_example(EXAMPLES['2d']['square'])
+    # run_example(EXAMPLES['2d']['square'])
     # run_example(EXAMPLES['2d']['square'], 'voronoi')
     # run_example(EXAMPLES['2d']['hexagon'])
     # run_example(EXAMPLES['2d']['hexagon'], 'voronoi')
@@ -163,7 +163,7 @@ if __name__ == "__main__":
     # run_example(EXAMPLES['2d']['tunnel'], 'voronoi')
     # run_example(EXAMPLES['2d']['cycle'])
     # run_example(EXAMPLES['2d']['cycle'], 'voronoi')
-    # run_example(EXAMPLES['2d']['weighted'])
+    run_example(EXAMPLES['2d']['weighted'])
     # run_example(EXAMPLES['2d']['weighted'], 'voronoi')
 
     # run_example(EXAMPLES['3d']['cube'])

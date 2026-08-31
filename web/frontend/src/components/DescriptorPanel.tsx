@@ -55,13 +55,31 @@ function monomialLabel(i: number): Partial<Layout>['annotations'] {
   ]
 }
 
+// black border around the plot region
+const BORDER: Partial<Layout>['shapes'] = [
+  {
+    type: 'rect',
+    xref: 'paper',
+    yref: 'paper',
+    x0: 0,
+    y0: 0,
+    x1: 1,
+    y1: 1,
+    line: { color: 'black', width: 1 },
+    layer: 'below',
+  },
+]
+
+const TICKS = { ticks: 'outside', ticklen: 4, tickcolor: 'black' } as const
+
 function baseLayout(i: number, xmin: number, xmax: number): Partial<Layout> {
   return {
     height: PANEL_HEIGHT,
-    margin: { l: 40, r: 10, t: 6, b: i === 0 ? 30 : 18 },
-    xaxis: { range: [xmin, xmax] },
+    margin: { l: 40, r: 10, t: 6, b: 30 },
+    xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
     showlegend: false,
     annotations: monomialLabel(i),
+    shapes: BORDER,
   }
 }
 
@@ -76,10 +94,11 @@ function squareLayout(i: number, xmin: number, xmax: number, rightMargin = 12): 
     width: SQ_MARGIN.l + SQUARE + rightMargin,
     height: SQ_MARGIN.t + SQUARE + SQ_MARGIN.b,
     margin: { l: SQ_MARGIN.l, r: rightMargin, t: SQ_MARGIN.t, b: SQ_MARGIN.b },
-    xaxis: { range: [xmin, xmax] },
-    yaxis: { range: [xmin, xmax] },
+    xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
+    yaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
     showlegend: false,
     annotations: monomialLabel(i),
+    shapes: BORDER,
   }
 }
 
@@ -95,7 +114,7 @@ function BarcodePlots({ results }: { results: ComputeResponse }) {
           x: [b.birth, b.death ?? xmax],
           y: [-j, -j],
           mode: 'lines',
-          line: { color: 'black', width: 3, dash: b.death === null ? 'dot' : 'solid' },
+          line: { color: 'black', width: 3 },
           hoverinfo: 'text',
           text: `[${b.birth.toFixed(3)}, ${b.death === null ? '∞' : b.death.toFixed(3)}] × ${b.multiplicity.toFixed(3)}`,
         }))
@@ -108,6 +127,18 @@ function BarcodePlots({ results }: { results: ComputeResponse }) {
           textfont: { size: 9 },
           hoverinfo: 'skip',
         })
+        // open endpoint where an infinite bar meets the border: [birth, ∞)
+        const infBars = bars.map((b, j) => ({ b, j })).filter(({ b }) => b.death === null)
+        if (infBars.length > 0) {
+          traces.push({
+            x: infBars.map(() => xmax),
+            y: infBars.map(({ j }) => -j),
+            mode: 'markers',
+            marker: { symbol: 'circle', size: 7, color: 'white', line: { color: 'black', width: 1.5 } },
+            cliponaxis: false,
+            hoverinfo: 'skip',
+          })
+        }
         const layout = baseLayout(i, xmin, xmax)
         layout.yaxis = { visible: false, range: [-bars.length, 1] }
         return <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} useResizeHandler style={{ width: '100%' }} />
@@ -123,6 +154,8 @@ function DiagramPlots({ results }: { results: ComputeResponse }) {
     <>
       {dims.map((i) => {
         const bars = results.barcodes[i]
+        const finite = bars.filter((b) => b.death !== null)
+        const infinite = bars.filter((b) => b.death === null)
         const traces: Data[] = [
           {
             x: [xmin, xmax],
@@ -133,19 +166,31 @@ function DiagramPlots({ results }: { results: ComputeResponse }) {
             hoverinfo: 'skip',
           },
           {
-            x: bars.map((b) => b.birth),
-            y: bars.map((b) => b.death ?? xmax),
+            x: finite.map((b) => b.birth),
+            y: finite.map((b) => b.death as number),
             mode: 'markers+text',
-            marker: { color: 'black', size: 5, symbol: bars.map((b) => (b.death === null ? 'triangle-up' : 'circle')) },
-            text: bars.map((b) => b.multiplicity.toFixed(3)),
+            marker: { color: 'black', size: 5 },
+            text: finite.map((b) => b.multiplicity.toFixed(3)),
             textposition: 'middle right',
             textfont: { size: 9 },
             hoverinfo: 'text',
-            hovertext: bars.map(
-              (b) => `(${b.birth.toFixed(3)}, ${b.death === null ? '∞' : b.death.toFixed(3)}) × ${b.multiplicity.toFixed(3)}`,
+            hovertext: finite.map(
+              (b) => `(${b.birth.toFixed(3)}, ${(b.death as number).toFixed(3)}) × ${b.multiplicity.toFixed(3)}`,
             ),
           },
         ]
+        if (infinite.length > 0) {
+          // open marker pinned to the top border: death = ∞ (no multiplicity label)
+          traces.push({
+            x: infinite.map((b) => b.birth),
+            y: infinite.map(() => xmax),
+            mode: 'markers',
+            marker: { symbol: 'circle', size: 7, color: 'white', line: { color: 'black', width: 1.5 } },
+            cliponaxis: false,
+            hoverinfo: 'text',
+            hovertext: infinite.map((b) => `(${b.birth.toFixed(3)}, ∞) × ${b.multiplicity.toFixed(3)}`),
+          })
+        }
         const layout = squareLayout(i, xmin, xmax)
         return (
           <div key={i} className="square-plot">

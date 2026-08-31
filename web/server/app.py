@@ -134,7 +134,9 @@ def compute(req: ComputeRequest):
         })
 
     finite_filtrations = [a['filtration'] for a in arcs if np.isfinite(a['filtration'])]
-    max_radius = max(finite_filtrations) if finite_filtrations else 1.0
+    # Slider bound: with large weights every filtration can be negative
+    # (signed-sqrt radius scale), so fall back to the magnitudes.
+    max_radius = max((abs(f) for f in finite_filtrations), default=1.0) or 1.0
 
     def encode_bar(bar):
         birth, death, multiplicity = bar
