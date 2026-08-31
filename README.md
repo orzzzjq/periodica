@@ -18,6 +18,16 @@ To build Periodica from source, please install [bazelisk](https://github.com/baz
 make
 ```
 
+## Web UI
+
+A browser frontend (edit lattice/points/weights, visualize the periodic Delaunay
+with a filtration slider, and view barcode/diagram/image descriptors) lives in `web/`:
+
+```
+make web                          # FastAPI backend on :8000 (serves web/frontend/dist if built)
+cd web/frontend && npm install && npm run dev   # dev server on :5173
+```
+
 ## References
 
 Periodica is based on the following research papers:

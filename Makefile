@@ -6,9 +6,9 @@ SO_DST ?= periodica/_periodica.so
 VENV_DIR ?= .venv
 VENV_PY ?= $(VENV_DIR)/bin/python
 VENV_BIN ?= $(VENV_DIR)/bin
-PYTHON_PACKAGES ?= numpy matplotlib scipy
+PYTHON_PACKAGES ?= numpy matplotlib scipy fastapi 'uvicorn[standard]'
 
-.PHONY: all install-uv venv requirements build clean rebuild
+.PHONY: all install-uv venv requirements build clean rebuild web
 
 all: requirements build
 
@@ -52,6 +52,9 @@ requirements: venv
 build:
 	if [ -x "$(VENV_PY)" ]; then PATH="$(VENV_BIN):$$PATH" $(BAZEL) build $(BAZEL_FLAGS) $(TARGET); else $(BAZEL) build $(BAZEL_FLAGS) $(TARGET); fi
 	cp -f $(SO_SRC) $(SO_DST)
+
+web:
+	$(VENV_BIN)/uvicorn app:app --app-dir web/server --port 8000 --reload
 
 clean:
 	$(BAZEL) clean --expunge

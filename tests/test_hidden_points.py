@@ -13,10 +13,14 @@ import math
 import os
 import sys
 
+os.environ.setdefault('MPLBACKEND', 'Agg')
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, REPO_ROOT)
 
 import numpy as np
+from matplotlib import pyplot as plt
+from periodica import _periodica
 from periodica.core import Periodica
 
 
@@ -87,6 +91,38 @@ def test_2d_unweighted_control():
     check_hidden_case('2d unweighted control', 2, points, [0.0, 0.0], expected_hidden=[])
 
 
+def test_plot_delaunay_arc_positions():
+    # Point 0 is hidden by point 1, so kept_points == [1] and the arc-endpoint
+    # remap is non-identity: drawing arcs with P[:, s] instead of
+    # P[:, kept_points[s]] would anchor them at the hidden point's position.
+    points = np.array([
+        [0.30, 0.25],
+        [0.25, 0.25],
+    ]).T
+    weights = np.array([0.0, 0.09])
+
+    p = Periodica()
+    p.set_geometry({'d': 2, 'U': np.eye(2), 'n_points': 2,
+                    'points': points, 'weights': weights})
+    p.plot_delaunay(show=False)
+    assert p.hidden_points == [0], f'expected point 0 hidden, got {p.hidden_points}'
+
+    P, _ = _periodica.full_delaunay(np.eye(2), points, weights)
+    kept_positions = P[:, p.kept_points].T
+    hidden_position = P[:, 0]
+
+    arcs = [l for l in plt.gcf().axes[0].get_lines() if l.get_color() == '#0000FE']
+    assert arcs, 'no highlighted periodic Delaunay arcs were drawn'
+    for line in arcs:
+        x, y = line.get_xdata(), line.get_ydata()
+        start = np.array([x[0], y[0]])
+        assert any(np.allclose(start, kp) for kp in kept_positions), \
+            f'arc starts at {start}, which is not a kept canonical point ' \
+            f'{"(it is the hidden point!)" if np.allclose(start, hidden_position) else ""}'
+    plt.close('all')
+    print('PASS plot_delaunay arc positions with hidden point')
+
+
 def test_quotient_file_regression():
     # The file-based pipeline bypasses periodic_delaunay and must be unaffected.
     p = Periodica()
@@ -100,5 +136,6 @@ if __name__ == '__main__':
     test_2d_hidden_point()
     test_3d_hidden_point()
     test_2d_unweighted_control()
+    test_plot_delaunay_arc_positions()
     test_quotient_file_regression()
     print('All hidden-point tests passed.')

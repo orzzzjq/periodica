@@ -43,6 +43,15 @@ periodica/cpp/          C++ core, compiled into _periodica.so
   periodica.cpp         pybind11 bindings only (module name: _periodica).
   auxiliary.{h,cpp}     Small shared helpers.
 periodica/core.py       High-level Python `Periodica` class + all matplotlib visualization.
+web/server/app.py       FastAPI backend for the web UI: POST /api/compute wraps the full
+                        Delaunay pipeline and returns draw-ready JSON (resolved arc
+                        coordinates, Dirichlet polytopes, barcodes with death=null for
+                        infinite bars, persistence images). Run with `make web`.
+web/frontend/           Vite + React + TypeScript frontend: react-three-fiber scene
+                        (cell, points, quotient arcs, filtration-ball slider; 2D ortho /
+                        3D orbit) + Plotly descriptor tabs (barcode/diagram/image).
+                        Dev: `npm run dev` (proxies /api to :8000); `npm run build` puts
+                        dist/ where the FastAPI app serves it statically.
 periodica/__init__.py   Re-exports _periodica symbols + Periodica.
 main.py                 Example driver (2D/3D lattices, weighted points, quotient files).
 analysis.py             Extra analysis scripts.

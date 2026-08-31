@@ -61,7 +61,7 @@ class Periodica:
         # and contribute nothing to the filtration; the backend drops them and
         # remaps the arc endpoints to the surviving points.
         self.kept_points = np.asarray(kept, dtype=int).reshape(-1)
-        self.hidden_points = sorted(set(range(self.n_points)) - set(self.kept_points))
+        self.hidden_points = sorted(set(range(self.n_points)) - set(self.kept_points.tolist()))
         if self.hidden_points:
             print(f'[WARNING] {len(self.hidden_points)} hidden point(s) dropped from weighted Delaunay: {self.hidden_points}')
         self.n_quotient_vertices = len(self.kept_points)
@@ -486,10 +486,11 @@ class Periodica:
                 ax.plot(*P[:,(s,t)], '--', lw=1, color='k', alpha=0.8, zorder=0)
 
             # Highlight the periodic Delaunay edges
+            # (arc endpoints index the kept points; P uses original indexing)
             for i in range(len(self.quotient_arcs)):
                 s, t = self.quotient_arcs[i]
-                sP = P[:,s]
-                tP = P[:,t] + self.V[:,:-1] @ self.quotient_arc_shift[:,i]
+                sP = P[:,self.kept_points[s]]
+                tP = P[:,self.kept_points[t]] + self.V[:,:-1] @ self.quotient_arc_shift[:,i]
                 ax.plot([sP[0], tP[0]], [sP[1], tP[1]], lw=1.5, color='#0000FE', zorder=1)
 
             ax.set_aspect(1)
@@ -523,10 +524,11 @@ class Periodica:
             # ax.scatter(*canonical_points, color=red, s=5)
 
             # Highlight the periodic Delaunay edges
+            # (arc endpoints index the kept points; P uses original indexing)
             for i in range(len(self.quotient_arcs)):
                 s, t = self.quotient_arcs[i]
-                sP = P[:,s]
-                tP = P[:,t] + self.V[:,:-1] @ self.quotient_arc_shift[:,i]
+                sP = P[:,self.kept_points[s]]
+                tP = P[:,self.kept_points[t]] + self.V[:,:-1] @ self.quotient_arc_shift[:,i]
                 ax.plot([sP[0], tP[0]], [sP[1], tP[1]], [sP[2], tP[2]], lw=1.5, color='#0000FE', zorder=1)
             
             limits = np.array([getattr(ax, f'get_{axis}lim')() for axis in 'xyz'])
