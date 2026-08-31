@@ -9,6 +9,7 @@ components (which show up as extra infinite bars in the barcode).
 Run from anywhere:  .venv/bin/python tests/test_hidden_points.py
 """
 
+import math
 import os
 import sys
 
@@ -18,14 +19,12 @@ sys.path.insert(0, REPO_ROOT)
 import numpy as np
 from periodica.core import Periodica
 
-INF = 1e308
-
 
 def count_infinite_bars(periodica):
     # A hidden point leaked into the merge tree is an isolated component that never
     # merges with any lattice translate; it shows up as a spurious infinite bar in
     # the top-dimensional barcode, so count infinite bars across all dimensions.
-    return sum(1 for bars in periodica.barcodes() for bar in bars if bar[1] >= INF)
+    return sum(1 for bars in periodica.barcodes() for bar in bars if math.isinf(bar[1]))
 
 
 def build(d, points, weights):

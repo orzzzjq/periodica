@@ -164,7 +164,7 @@ class Periodica:
         if not hasattr(self, 'bcodes'):
             self.barcodes()
 
-        inf = 1e+308
+        inf = np.inf
         xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
         xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
         xspan = xmax - xmin
@@ -179,7 +179,7 @@ class Periodica:
         if not hasattr(self, 'bcodes'):
             self.barcodes()
         
-        inf = 1e+308
+        inf = np.inf
         sep = 1
         labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
@@ -226,7 +226,7 @@ class Periodica:
         if not hasattr(self, 'bcodes'):
             self.barcodes()
 
-        inf = 1e+308
+        inf = np.inf
         labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
         own_figure = ax is None
@@ -273,7 +273,7 @@ class Periodica:
         if not hasattr(self, 'persistence_images'):
             self.images()
 
-        inf = 1e+308
+        inf = np.inf
         labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
 
         own_figure = ax is None
@@ -456,7 +456,7 @@ class Periodica:
         self.periodic_delaunay()
 
         show_slidebar = slidebar and not ax
-        inf = 1e+308
+        inf = np.inf
         max_radius = max(map(lambda x: x if x < inf else -inf, self.quotient_arc_filtration))
 
         if not ax:

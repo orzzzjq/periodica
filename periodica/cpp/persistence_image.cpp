@@ -1,5 +1,7 @@
 #include "persistence_image.h"
 
+#include <cmath>
+
 std::function<double(std::pair<double, double>, std::pair<double, double>)> Gaussian_function(double sigma) {
   return [=](std::pair<double, double> p, std::pair<double, double> q) {
     return std::exp(-((p.first - q.first) * (p.first - q.first) + (p.second - q.second) * (p.second - q.second)) /
@@ -11,8 +13,17 @@ using constant_scaling_function = Persistence_image::constant_scaling_function;
 using PI = Persistence_image::Persistence_image<constant_scaling_function>;
 
 Eigen::MatrixXd persistenceImage(const std::vector<std::tuple<double, double, double>>& barcode, int size, double min, double max) {
+    // Bars with infinite death carry no finite grid position; exclude them so the
+    // grid mapping below never casts a non-finite value to int.
+    std::vector<std::tuple<double, double, double>> finite_bars;
+    finite_bars.reserve(barcode.size());
+    for (const auto& bar : barcode) {
+        if (std::isfinite(std::get<1>(bar))) {
+            finite_bars.push_back(bar);
+        }
+    }
     std::vector<std::vector<double> > filter = Persistence_image::create_Gaussian_filter(5, 1);
-    PI pi(barcode, filter, false, size, min, max);
+    PI pi(finite_bars, filter, false, size, min, max);
     Eigen::MatrixXd M(pi.heat_map.size(), pi.heat_map.size());
     for (int i = 0; i < M.rows(); ++i) {
         for (int j = 0; j < M.cols(); ++j) {

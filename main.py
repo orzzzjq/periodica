@@ -31,8 +31,8 @@ def run_example(INPUT, TYPE='delaunay', show_geometry=True):
     periodica.set_geometry(INPUT)
     periodica.quotient_complex(TYPE)
     periodica.merge_tree()
-    # periodica.print_merge_tree()
-    # periodica.plot_all_descriptors(show=(not show_geometry), same_range=False)
+    periodica.print_merge_tree()
+    periodica.plot_all_descriptors(show=(not show_geometry), same_range=False)
     if show_geometry:
         if TYPE != 'delaunay':
             periodica.plot_geometry(TYPE, show=False, slidebar=True, use_circumcenter=False)
@@ -155,7 +155,7 @@ if __name__ == "__main__":
     # run_2d_quotient_example_2()
     # run_3d_quotient_example()
     
-    # run_example(EXAMPLES['2d']['square'])
+    run_example(EXAMPLES['2d']['square'])
     # run_example(EXAMPLES['2d']['square'], 'voronoi')
     # run_example(EXAMPLES['2d']['hexagon'])
     # run_example(EXAMPLES['2d']['hexagon'], 'voronoi')
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     # run_example(EXAMPLES['2d']['weighted'], 'voronoi')
 
     # run_example(EXAMPLES['3d']['cube'])
-    run_example(EXAMPLES['3d']['cube'], 'voronoi')
+    # run_example(EXAMPLES['3d']['cube'], 'voronoi')
     # run_example(EXAMPLES['3d']['diamond'])
     # run_example(EXAMPLES['3d']['diamond'], 'voronoi')
     # run_example(EXAMPLES['3d']['line'])

@@ -2,6 +2,8 @@
 #include "delaunay.h"
 #include "merge_tree.h"
 
+#include <cmath>
+
 namespace PMT {
 using namespace Eigen;
 
@@ -405,7 +407,7 @@ class Barcode {
 private:
 	double _birth, _death, _multiplicity;
 public:
-	Barcode() : _birth(std::numeric_limits<double>::lowest()), _death(std::numeric_limits<double>::max()), _multiplicity(0) {}
+	Barcode() : _birth(std::numeric_limits<double>::lowest()), _death(std::numeric_limits<double>::infinity()), _multiplicity(0) {}
 	Barcode(double birth, double death, double multiplicity)
 		: _birth(birth), _death(death), _multiplicity(multiplicity) {}
 
@@ -415,7 +417,7 @@ public:
 
 	std::string toString() {
 		char s[100];
-		if (_death == std::numeric_limits<double>::max()) {
+		if (std::isinf(_death)) {
 			std::snprintf(s, sizeof(s), "[%.3f, +inf) %.3f", _birth, _multiplicity);
 		}
 		else {
@@ -439,7 +441,7 @@ template <typename EventList>
 void constructBarcodes(vector<EventList>& beams, vector<vector<Barcode>>& barcodes) {
 	int i, j, k;
 	double birth, death;
-	constexpr double inf = std::numeric_limits<double>::max();
+	constexpr double inf = std::numeric_limits<double>::infinity();
 	for (i = 0; i < beams.size(); ++i) {
 		EventList& epoch = beams[i];
 		myDebug("%d: %d epoches\n", i, epoch.size());
