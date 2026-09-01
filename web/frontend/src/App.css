@@ -137,11 +137,11 @@
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 16px;
+  width: 16px; /* hit area stays comfortable */
   height: 16px;
   cursor: nwse-resize;
   touch-action: none;
-  background: linear-gradient(135deg, transparent 50%, #bbb 50%, #bbb 60%, transparent 60%, transparent 70%, #bbb 70%, #bbb 80%, transparent 80%);
+  background: linear-gradient(135deg, transparent 50%, #bbb 50%, #bbb 60%, transparent 60%, transparent 70%, #bbb 70%, #bbb 80%, transparent 80%) bottom right / 8px 8px no-repeat;
 }
 
 .tab-ghost {
