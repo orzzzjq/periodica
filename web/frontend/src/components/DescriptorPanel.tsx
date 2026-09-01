@@ -72,15 +72,37 @@ const BORDER: Partial<Layout>['shapes'] = [
 
 const TICKS = { ticks: 'outside', ticklen: 4, tickcolor: 'black' } as const
 
-function baseLayout(i: number, xmin: number, xmax: number): Partial<Layout> {
+function baseLayout(i: number, xmin: number, xmax: number, width: number): Partial<Layout> {
   return {
+    width,
     height: PANEL_HEIGHT,
-    margin: { l: 40, r: 10, t: 6, b: 30 },
+    margin: { l: 40, r: 40, t: 6, b: 30 },
     xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
     showlegend: false,
     annotations: monomialLabel(i),
     shapes: BORDER,
   }
+}
+
+// Width that tracks the hosting panel. Explicitly measured (rather than
+// Plotly's useResizeHandler, which relies on window resize events and goes
+// stale while the panel is minimized into the app bar): the ResizeObserver
+// re-fires when the content holder is reattached to the DOM on restore.
+function usePanelWidth(minW = 300) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(minW)
+  useEffect(() => {
+    const holder = ref.current?.parentElement // the panel-content-holder
+    if (!holder) return
+    const recompute = () => {
+      if (holder.clientWidth > 0) setWidth(Math.max(minW, holder.clientWidth - 18))
+    }
+    recompute()
+    const obs = new ResizeObserver(recompute)
+    obs.observe(holder)
+    return () => obs.disconnect()
+  }, [minW])
+  return { ref, width }
 }
 
 // A genuinely square plot region with identical x/y ranges — equal aspect
@@ -127,7 +149,7 @@ function useSquareSize(nPlots: number, rightMargin: number, extraTop = 0) {
   return { ref, size }
 }
 
-function BarcodePlots({ results }: { results: ComputeResponse }) {
+function BarcodePlots({ results, width }: { results: ComputeResponse; width: number }) {
   const [xmin, xmax] = xRange(results.barcodes, 0.12, 0.05)
   // highest exponent on top, like plot_barcodes
   const dims = [...results.barcodes.keys()].reverse()
@@ -164,9 +186,9 @@ function BarcodePlots({ results }: { results: ComputeResponse }) {
             hoverinfo: 'skip',
           })
         }
-        const layout = baseLayout(i, xmin, xmax)
+        const layout = baseLayout(i, xmin, xmax, width)
         layout.yaxis = { visible: false, range: [-bars.length, 1] }
-        return <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} useResizeHandler style={{ width: '100%' }} />
+        return <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} />
       })}
     </>
   )
@@ -275,10 +297,10 @@ function ImagePlots({ results, sameRange, size }: { results: ComputeResponse; sa
 
 export function BarcodePanel() {
   const results = useStore((s) => s.results)
-  if (!results) return <div className="plots" />
+  const { ref, width } = usePanelWidth()
   return (
-    <div className="plots">
-      <BarcodePlots results={results} />
+    <div className="plots" ref={ref}>
+      {results && <BarcodePlots results={results} width={width} />}
     </div>
   )
 }
