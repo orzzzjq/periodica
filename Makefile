@@ -7,8 +7,12 @@ VENV_DIR ?= .venv
 VENV_PY ?= $(VENV_DIR)/bin/python
 VENV_BIN ?= $(VENV_DIR)/bin
 PYTHON_PACKAGES ?= numpy matplotlib scipy fastapi 'uvicorn[standard]'
+FRONTEND_DIR ?= web/frontend
+FRONTEND_DIST ?= $(FRONTEND_DIR)/dist
+WEB_HOST ?= 0.0.0.0
+WEB_PORT ?= 8000
 
-.PHONY: all install-uv venv requirements build clean rebuild web
+.PHONY: all install-uv venv requirements build clean rebuild web web-build
 
 all: requirements build
 
@@ -53,8 +57,28 @@ build:
 	if [ -x "$(VENV_PY)" ]; then PATH="$(VENV_BIN):$$PATH" $(BAZEL) build $(BAZEL_FLAGS) $(TARGET); else $(BAZEL) build $(BAZEL_FLAGS) $(TARGET); fi
 	cp -f $(SO_SRC) $(SO_DST)
 
-web:
-	$(VENV_BIN)/uvicorn app:app --app-dir web/server --port 8000 --reload
+web-build:
+	@if command -v npm >/dev/null 2>&1; then \
+		if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then \
+			npm --prefix $(FRONTEND_DIR) install; \
+		fi; \
+		npm --prefix $(FRONTEND_DIR) run build; \
+	elif [ -d "$(FRONTEND_DIST)" ]; then \
+		echo "npm not found; serving existing $(FRONTEND_DIST)"; \
+	else \
+		echo "Error: npm is required to build the web frontend ($(FRONTEND_DIR))."; \
+		exit 1; \
+	fi
+
+web: web-build
+	@echo "Web UI: http://localhost:$(WEB_PORT)"
+	@if grep -qi microsoft /proc/version 2>/dev/null; then \
+		( sleep 1; \
+		  if command -v wslview >/dev/null 2>&1; then wslview "http://localhost:$(WEB_PORT)"; \
+		  elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe "http://localhost:$(WEB_PORT)" || true; \
+		  fi ) >/dev/null 2>&1 & \
+	fi
+	$(VENV_BIN)/uvicorn app:app --app-dir web/server --host $(WEB_HOST) --port $(WEB_PORT) --reload
 
 clean:
 	$(BAZEL) clean --expunge
