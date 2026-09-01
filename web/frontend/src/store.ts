@@ -11,8 +11,11 @@ export interface Inputs {
 
 interface UiState {
   radius: number
-  showFullSkeleton: boolean
+  showPoints: boolean
+  showBasis: boolean
   showDomains: boolean
+  showFullSkeleton: boolean
+  showArcs: boolean
   showBalls: boolean
   sameRange: boolean
   imageSize: number
@@ -72,8 +75,11 @@ export const useStore = create<State>((set, get) => {
     error: null,
     ui: {
       radius: 0,
-      showFullSkeleton: true,
+      showPoints: true,
+      showBasis: true,
       showDomains: true,
+      showFullSkeleton: true,
+      showArcs: true,
       showBalls: true,
       sameRange: true,
       imageSize: 100,

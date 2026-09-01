@@ -1,6 +1,6 @@
 import { Canvas, useThree } from '@react-three/fiber'
 import { Line, MapControls, OrbitControls, OrthographicCamera } from '@react-three/drei'
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import * as THREE from 'three'
 import type { ComputeResponse, Polytope2D, Polytope3D } from '../api'
 import { useStore } from '../store'
@@ -180,7 +180,7 @@ export default function Scene() {
         </>
       )}
 
-      <BasisArrows basis={results.basis} />
+      {ui.showBasis && <BasisArrows basis={results.basis} />}
       {ui.showDomains &&
         (is2d ? (
           <>
@@ -194,10 +194,43 @@ export default function Scene() {
           </>
         ))}
       {ui.showFullSkeleton && <FullSkeleton results={results} />}
-      <QuotientArcs results={results} />
-      <Points results={results} />
+      {ui.showArcs && <QuotientArcs results={results} />}
+      {ui.showPoints && <Points results={results} />}
       {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
     </Canvas>
+  )
+}
+
+// Pop-up display options, embedded in the Visualization panel header.
+const DISPLAY_TOGGLES = [
+  { key: 'showPoints', label: 'points' },
+  { key: 'showBasis', label: 'lattice vectors' },
+  { key: 'showDomains', label: 'Dirichlet domains' },
+  { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
+  { key: 'showArcs', label: 'periodic Delaunay edges' },
+  { key: 'showBalls', label: 'filtration balls' },
+] as const
+
+export function DisplayOptions() {
+  const ui = useStore((s) => s.ui)
+  const setUi = useStore((s) => s.setUi)
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="popup-control">
+      <button className={open ? 'active' : ''} onClick={() => setOpen(!open)}>
+        display {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <div className="popup-panel">
+          {DISPLAY_TOGGLES.map(({ key, label }) => (
+            <label className="row" key={key}>
+              <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

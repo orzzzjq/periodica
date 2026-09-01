@@ -2,7 +2,7 @@ import ControlPanel from './components/ControlPanel'
 import { BarcodePanel, DiagramPanel, ImagePanel, SharedRangeToggle } from './components/DescriptorPanel'
 import PanelHost from './components/PanelSystem'
 import RadiusSlider from './components/RadiusSlider'
-import Scene from './components/Scene'
+import Scene, { DisplayOptions } from './components/Scene'
 import './App.css'
 
 const CONTENTS = {
@@ -21,6 +21,7 @@ const CONTENTS = {
 }
 
 const HEADER_EXTRAS = {
+  scene: <DisplayOptions />,
   image: <SharedRangeToggle />,
 }
 

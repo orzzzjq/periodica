@@ -27,8 +27,6 @@ export default function ControlPanel() {
   const results = useStore((s) => s.results)
   const status = useStore((s) => s.status)
   const error = useStore((s) => s.error)
-  const ui = useStore((s) => s.ui)
-  const setUi = useStore((s) => s.setUi)
   const setLatticeEntry = useStore((s) => s.setLatticeEntry)
   const setPointCoord = useStore((s) => s.setPointCoord)
   const setWeight = useStore((s) => s.setWeight)
@@ -113,26 +111,6 @@ export default function ControlPanel() {
           </tbody>
         </table>
         <button onClick={addPoint}>+ add point</button>
-      </section>
-
-      <section>
-        <h2>Display</h2>
-        <label className="row">
-          <input
-            type="checkbox"
-            checked={ui.showFullSkeleton}
-            onChange={(e) => setUi({ showFullSkeleton: e.target.checked })}
-          />
-          full Delaunay skeleton
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={ui.showDomains} onChange={(e) => setUi({ showDomains: e.target.checked })} />
-          Dirichlet domains
-        </label>
-        <label className="row">
-          <input type="checkbox" checked={ui.showBalls} onChange={(e) => setUi({ showBalls: e.target.checked })} />
-          filtration balls
-        </label>
       </section>
 
       <section className="status">

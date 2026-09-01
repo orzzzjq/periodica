@@ -90,7 +90,8 @@
   display: flex;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  /* visible so header pop-ups (e.g. the display options) can drop below */
+  overflow: visible;
 }
 
 .tab {
@@ -310,6 +311,7 @@ button:disabled {
 }
 
 .header-extra {
+  position: relative;
   display: flex;
   align-items: center;
   padding: 0 10px;
@@ -317,6 +319,26 @@ button:disabled {
   color: #444;
   white-space: nowrap;
   cursor: default;
+}
+
+.popup-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.popup-panel {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(2px);
+  border: 1px solid #c4c4c4;
+  border-radius: 4px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
+  padding: 8px 14px;
+  min-width: 180px;
 }
 
 .header-extra .row {
