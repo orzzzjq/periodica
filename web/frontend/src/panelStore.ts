@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useStore } from './store'
 
 export type PanelId = 'input' | 'scene' | 'barcode' | 'diagram' | 'image'
 
@@ -57,36 +58,37 @@ function clampPos(x: number, y: number, w: number): [number, number] {
 }
 
 function defaultLayout(): Record<string, PanelGroup> {
-  const vw = Math.max(window.innerWidth, 900)
+  const vw = Math.max(window.innerWidth, 1100)
   const vh = Math.max(window.innerHeight - APP_BAR_H, 500)
-  const descW = 440
+  const gap = 12
+
+  // All three descriptor windows share the minimal height that fully shows
+  // the d+1 plots: every descriptor plot is 196px tall at minimum (154px
+  // region + 8/34 margins); body needs n x 196 + 10, plus header 32 and
+  // border 2.
+  const nPlots = useStore.getState().inputs.d + 1
+  const descH = Math.min(nPlots * 196 + 44, vh - 2 * gap)
+
   const inputW = 300
-  const gap = 10
-  const h = vh - 2 * gap
+  const diagramW = 240 // 46 + 154 + 12 margins + chrome
+  const imageW = 310 // 46 + 154 + 80 (colorbar margin) + chrome
+  const flexible = Math.max(vw - inputW - diagramW - imageW - 6 * gap, 700)
+  const sceneW = Math.max(Math.round(flexible * 0.53), 380)
+  const barcodeW = Math.max(flexible - sceneW, 320)
+
+  let x = gap
+  const at = (w: number) => {
+    const pos = x
+    x += w + gap
+    return pos
+  }
+
   const groups: PanelGroup[] = [
-    { id: newId(), x: gap, y: gap, w: inputW, h: Math.min(640, h), z: 1, minimized: false, tabs: ['input'], active: 'input' },
-    {
-      id: newId(),
-      x: inputW + 2 * gap,
-      y: gap,
-      w: Math.max(vw - inputW - descW - 4 * gap, 400),
-      h,
-      z: 2,
-      minimized: false,
-      tabs: ['scene'],
-      active: 'scene',
-    },
-    {
-      id: newId(),
-      x: vw - descW - gap,
-      y: gap,
-      w: descW,
-      h,
-      z: 3,
-      minimized: false,
-      tabs: ['barcode', 'diagram', 'image'],
-      active: 'barcode',
-    },
+    { id: newId(), x: at(inputW), y: gap, w: inputW, h: descH, z: 1, minimized: false, tabs: ['input'], active: 'input' },
+    { id: newId(), x: at(sceneW), y: gap, w: sceneW, h: descH, z: 2, minimized: false, tabs: ['scene'], active: 'scene' },
+    { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode'], active: 'barcode' },
+    { id: newId(), x: at(diagramW), y: gap, w: diagramW, h: descH, z: 4, minimized: false, tabs: ['diagram'], active: 'diagram' },
+    { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 5, minimized: false, tabs: ['image'], active: 'image' },
   ]
   return Object.fromEntries(groups.map((g) => [g.id, g]))
 }

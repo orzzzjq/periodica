@@ -39,7 +39,9 @@ function xRange(barcodes: Bar[][], padLeft: number, padRight: number): [number, 
   return [xmin - padLeft * span, xmax + padRight * span]
 }
 
-const PANEL_HEIGHT = 190
+// One barcode plot: 154px plot region + the same t/b margins as the square
+// diagram/image plots, so all descriptors share the same vertical rhythm.
+const PANEL_HEIGHT = 196
 
 function monomialLabel(i: number): Partial<Layout>['annotations'] {
   return [
@@ -76,7 +78,7 @@ function baseLayout(i: number, xmin: number, xmax: number, width: number): Parti
   return {
     width,
     height: PANEL_HEIGHT,
-    margin: { l: 40, r: 40, t: 6, b: 30 },
+    margin: { l: 46, r: 46, t: 8, b: 34 },
     xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
     showlegend: false,
     annotations: monomialLabel(i),
@@ -108,7 +110,7 @@ function usePanelWidth(minW = 300) {
 // A genuinely square plot region with identical x/y ranges — equal aspect
 // without scaleanchor (which would otherwise widen the x range to fill the
 // panel width). Used by the diagram and image panels.
-const SQ_MIN = PANEL_HEIGHT - 6 - 30 // matches the barcode plot-region height (154px)
+const SQ_MIN = PANEL_HEIGHT - 8 - 34 // matches the barcode plot-region height (154px)
 const SQ_MAX = 360
 // Room for the always-on colorbar: bar + pads + worst-case tick labels.
 // Must be generous enough that Plotly never auto-expands the margin (which
@@ -153,8 +155,23 @@ function useSquareSize(nPlots: number, rightMargin: number, extraTop = 0) {
   return { ref, size }
 }
 
-function BarcodePlots({ results, width }: { results: ComputeResponse; width: number }) {
+function BarcodePlots({ results, width, radius }: { results: ComputeResponse; width: number; radius: number }) {
   const [xmin, xmax] = xRange(results.barcodes, 0.12, 0.05)
+  // live filtration cursor linked to the visualization slider
+  const radiusLine: Partial<Layout>['shapes'] =
+    radius > 1e-9
+      ? [
+          {
+            type: 'line',
+            x0: radius,
+            x1: radius,
+            y0: 0,
+            y1: 1,
+            yref: 'paper',
+            line: { color: 'red', width: 1, dash: 'dash' },
+          },
+        ]
+      : []
   // highest exponent on top, like plot_barcodes
   const dims = [...results.barcodes.keys()].reverse()
   return (
@@ -192,6 +209,7 @@ function BarcodePlots({ results, width }: { results: ComputeResponse; width: num
         }
         const layout = baseLayout(i, xmin, xmax, width)
         layout.yaxis = { visible: false, range: [-bars.length, 1] }
+        layout.shapes = [...(layout.shapes ?? []), ...radiusLine]
         return <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} />
       })}
     </>
@@ -315,10 +333,11 @@ function ImagePlots({ results, sameRange, size }: { results: ComputeResponse; sa
 
 export function BarcodePanel() {
   const results = useStore((s) => s.results)
+  const radius = useStore((s) => s.ui.radius)
   const { ref, width } = usePanelWidth()
   return (
     <div className="plots" ref={ref}>
-      {results && <BarcodePlots results={results} width={width} />}
+      {results && <BarcodePlots results={results} width={width} radius={radius} />}
     </div>
   )
 }

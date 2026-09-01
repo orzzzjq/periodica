@@ -223,6 +223,7 @@ export default function PanelHost({
   }, [])
 
   const restore = usePanelStore((s) => s.restore)
+  const resetLayout = usePanelStore((s) => s.resetLayout)
   const minimized = Object.values(groups)
     .filter((g) => g.minimized)
     .sort((a, b) => a.id.localeCompare(b.id))
@@ -238,6 +239,9 @@ export default function PanelHost({
             </button>
           ))}
         </div>
+        <button className="chip app-bar-right" onClick={resetLayout}>
+          reset layout
+        </button>
       </div>
       <div className="panel-host">
         {Object.values(groups).map((g) => (

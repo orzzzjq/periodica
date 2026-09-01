@@ -33,7 +33,7 @@ await page.reload({ waitUntil: 'networkidle' })
 await page.waitForTimeout(2200)
 await page.screenshot({ path: `${OUT}/panel-default.png` })
 console.log('groups initially:', await groupCount())
-if ((await groupCount()) !== 3) problems.push(`expected 3 initial groups, got ${await groupCount()}`)
+if ((await groupCount()) !== 5) problems.push(`expected 5 initial groups, got ${await groupCount()}`)
 
 // 1. drag the input window by its header
 const input0 = await rectOf(windowWithTab('input'))
@@ -64,23 +64,23 @@ const dumpGroups = async (label) => {
   console.log(`${label}:`, JSON.stringify(tabs))
 }
 
-// 3. drag the diagram tab out of the descriptor group into empty space
-// (bottom-left corner is free: the input window was moved right in step 1)
+// 3. drag the diagram window onto the barcode header -> merge into tabs
+const diag0 = await rectOf('.panel-window[data-tabs="diagram"]')
+const barcode0 = await rectOf(windowWithTab('barcode'))
+await drag(diag0.x + 100, diag0.y + 14, barcode0.x + barcode0.width - 80, barcode0.y + 14)
+await dumpGroups('after merge drag')
+if ((await groupCount()) !== 4) problems.push(`merge failed: ${await groupCount()} groups`)
+else console.log('merge by dragging onto header: OK')
+await page.screenshot({ path: `${OUT}/panel-merged.png` })
+
+// 4. drag the diagram tab back out into empty space (below the windows)
 const diagramTab = page.locator('.tab', { hasText: 'Diagram' })
 const tabBox = await diagramTab.boundingBox()
-await drag(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2, 80, 860)
+await drag(tabBox.x + tabBox.width / 2, tabBox.y + tabBox.height / 2, 300, 800)
 await dumpGroups('after detach drag')
-if ((await groupCount()) !== 4) problems.push(`detach failed: ${await groupCount()} groups`)
+if ((await groupCount()) !== 5) problems.push(`detach failed: ${await groupCount()} groups`)
 else console.log('detach tab -> floating window: OK')
 await page.screenshot({ path: `${OUT}/panel-detached.png` })
-
-// 4. drag the floating diagram window onto the barcode group header -> merge
-const diag = await rectOf('.panel-window[data-tabs="diagram"]')
-const barcode = await rectOf(windowWithTab('barcode'))
-await drag(diag.x + 150, diag.y + 14, barcode.x + barcode.width - 80, barcode.y + 14)
-await dumpGroups('after merge drag')
-if ((await groupCount()) !== 3) problems.push(`merge failed: ${await groupCount()} groups`)
-else console.log('merge by dragging onto header: OK')
 await page.screenshot({ path: `${OUT}/panel-merged.png` })
 
 // 5. persistence across reload

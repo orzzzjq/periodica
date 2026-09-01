@@ -43,6 +43,10 @@
   color: #fff;
 }
 
+.app-bar-right {
+  margin-left: auto;
+}
+
 .panel-host {
   position: fixed;
   inset: 36px 0 0 0;
@@ -301,6 +305,8 @@ button:disabled {
 /* ---- descriptor panels ---- */
 .plots {
   padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
 }
 
 .header-extra {
