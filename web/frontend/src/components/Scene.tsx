@@ -1,6 +1,6 @@
-import { Canvas, useThree } from '@react-three/fiber'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Line, MapControls, OrbitControls, OrthographicCamera } from '@react-three/drei'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { ComputeResponse, Polytope2D, Polytope3D } from '../api'
 import { useStore } from '../store'
@@ -131,23 +131,57 @@ function QuotientArcs({ results }: { results: ComputeResponse }) {
 function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
   const { positions3x, originalIndex, weights, hidden } = results.points
   const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+  const opacity = useStore((s) => s.ui.ballOpacity)
   const is2d = results.d === 2
+
+  // Stencil trick: each screen pixel is shaded by at most one ball (the first
+  // fragment marks the stencil, later ball fragments fail the NotEqual test),
+  // so overlapping balls render as a flat union instead of stacking alpha.
+  // In 3D the balls are lit (highlight + shading) so depth is readable.
+  const material = useMemo(() => {
+    const m = is2d
+      ? new THREE.MeshBasicMaterial({ color: '#999999', transparent: true, depthWrite: false })
+      : new THREE.MeshPhongMaterial({
+          color: '#8899aa',
+          specular: '#888888',
+          shininess: 60,
+          transparent: true,
+          depthWrite: false,
+        })
+    m.stencilWrite = true
+    m.stencilRef = 1
+    m.stencilFunc = THREE.NotEqualStencilFunc
+    m.stencilZPass = THREE.ReplaceStencilOp
+    return m
+  }, [is2d])
+  material.opacity = opacity
+  useEffect(() => () => material.dispose(), [material])
+
+  // The stencil makes the FIRST drawn fragment win, so draw balls nearest-
+  // first: with shaded 3D spheres the closest surface must own the overlap.
+  const groupRef = useRef<THREE.Group>(null)
+  useFrame(({ camera }) => {
+    if (is2d || !groupRef.current) return
+    for (const m of groupRef.current.children) {
+      m.renderOrder = m.position.distanceTo(camera.position)
+    }
+  })
+
   if (radius <= 0 && weights.every((w) => w === 0)) return null
   return (
-    <>
+    <group ref={groupRef}>
       {positions3x.map((p, i) => {
         const orig = originalIndex[i]
         if (hiddenSet.has(orig)) return null
         const r = radius + Math.sqrt(weights[orig])
         if (r <= 0) return null
         return (
-          <mesh key={i} position={is2d ? [p[0], p[1], -0.01] : to3(p)}>
-            {is2d ? <circleGeometry args={[r, 48]} /> : <sphereGeometry args={[r, 24, 24]} />}
-            <meshBasicMaterial color="#999999" transparent opacity={is2d ? 0.35 : 0.18} depthWrite={false} />
+          <mesh key={i} position={is2d ? [p[0], p[1], -0.01] : to3(p)} material={material}>
+            {is2d ? <circleGeometry args={[r, 48]} /> : <sphereGeometry args={[r, 32, 32]} />}
           </mesh>
         )
       })}
-    </>
+    </group>
   )
 }
 
@@ -167,7 +201,7 @@ export default function Scene() {
   const is2d = results.d === 2
 
   return (
-    <Canvas key={`${results.d}`} style={{ background: '#ffffff' }}>
+    <Canvas key={`${results.d}`} style={{ background: '#ffffff' }} gl={{ stencil: true }}>
       {is2d ? (
         <>
           <OrthographicCamera makeDefault position={[0, 0, 10]} zoom={220 / extent} />
@@ -177,6 +211,8 @@ export default function Scene() {
         <>
           <OrbitControls makeDefault />
           <CameraSetup extent={extent} />
+          <ambientLight intensity={1.2} />
+          <directionalLight position={[3, 5, 4]} intensity={1.6} />
         </>
       )}
 
@@ -223,10 +259,25 @@ export function DisplayOptions() {
       {open && (
         <div className="popup-panel">
           {DISPLAY_TOGGLES.map(({ key, label }) => (
-            <label className="row" key={key}>
-              <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />
-              {label}
-            </label>
+            <div key={key}>
+              <label className="row">
+                <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />
+                {label}
+              </label>
+              {key === 'showBalls' && ui.showBalls && (
+                <div className="row popup-sub">
+                  <span>transparency</span>
+                  <input
+                    type="range"
+                    min={0.05}
+                    max={1}
+                    step={0.01}
+                    value={ui.ballOpacity}
+                    onChange={(e) => setUi({ ballOpacity: e.target.valueAsNumber })}
+                  />
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}

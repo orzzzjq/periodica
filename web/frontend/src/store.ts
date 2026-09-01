@@ -17,6 +17,7 @@ interface UiState {
   showFullSkeleton: boolean
   showArcs: boolean
   showBalls: boolean
+  ballOpacity: number
   sameRange: boolean
   imageSize: number
 }
@@ -81,6 +82,7 @@ export const useStore = create<State>((set, get) => {
       showFullSkeleton: true,
       showArcs: true,
       showBalls: true,
+      ballOpacity: 0.35,
       sameRange: true,
       imageSize: 100,
     },
