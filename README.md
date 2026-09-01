@@ -1,6 +1,6 @@
-<p align="center">
-<img src="logo.png" width=300px></img>
-</p>
+<h1 align="center">
+<img src="logo.png" width=200px></img>
+</h1>
 
 Periodica is a
 C++ based Python library for analyzing the topological structures
