@@ -16,9 +16,18 @@
 }
 
 .app-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.03em;
+}
+
+.app-logo {
+  height: 22px;
+  width: auto;
+  display: block;
 }
 
 .app-bar-chips {

@@ -9,6 +9,7 @@ import {
   type PanelGroup,
   type PanelId,
 } from '../panelStore'
+import logoUrl from '../assets/logo.png'
 
 // Hit-test a viewport point against the other groups (store rects, not DOM,
 // so the window being dragged never occludes the target). Returns the
@@ -231,7 +232,10 @@ export default function PanelHost({
   return (
     <>
       <div className="app-bar">
-        <span className="app-brand">Periodica</span>
+        <span className="app-brand">
+          <img className="app-logo" src={logoUrl} alt="" />
+          Periodica
+        </span>
         <div className="app-bar-chips">
           {minimized.map((g) => (
             <button key={g.id} className="chip" title="restore" onClick={() => restore(g.id)}>
