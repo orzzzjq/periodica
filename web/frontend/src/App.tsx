@@ -1,5 +1,5 @@
 import ControlPanel from './components/ControlPanel'
-import { BarcodePanel, DiagramPanel, ImagePanel } from './components/DescriptorPanel'
+import { BarcodePanel, DiagramPanel, ImagePanel, SharedRangeToggle } from './components/DescriptorPanel'
 import PanelHost from './components/PanelSystem'
 import RadiusSlider from './components/RadiusSlider'
 import Scene from './components/Scene'
@@ -20,6 +20,10 @@ const CONTENTS = {
   image: <ImagePanel />,
 }
 
+const HEADER_EXTRAS = {
+  image: <SharedRangeToggle />,
+}
+
 export default function App() {
-  return <PanelHost contents={CONTENTS} />
+  return <PanelHost contents={CONTENTS} headerExtras={HEADER_EXTRAS} />
 }

@@ -108,8 +108,12 @@ function usePanelWidth(minW = 300) {
 // A genuinely square plot region with identical x/y ranges — equal aspect
 // without scaleanchor (which would otherwise widen the x range to fill the
 // panel width). Used by the diagram and image panels.
-const SQ_MIN = 175 // 70% of the original 250px
+const SQ_MIN = PANEL_HEIGHT - 6 - 30 // matches the barcode plot-region height (154px)
 const SQ_MAX = 360
+// Room for the always-on colorbar: bar + pads + worst-case tick labels.
+// Must be generous enough that Plotly never auto-expands the margin (which
+// would shrink the plot area and break the square shape).
+const IMG_RIGHT_MARGIN = 80
 const SQ_MARGIN = { l: 46, t: 8, b: 34 }
 
 function squareLayout(i: number, xmin: number, xmax: number, size: number, rightMargin = 12): Partial<Layout> {
@@ -279,10 +283,24 @@ function ImagePlots({ results, sameRange, size }: { results: ComputeResponse; sa
             zmin: -range,
             zmax: range,
             colorscale: SPECTRAL_R,
-            showscale: !sameRange,
+            showscale: true,
+            colorbar: {
+              thickness: 10,
+              lenmode: 'pixels',
+              len: size, // exactly the square plot-region height
+              ypad: 0, // default 10px padding would shrink the bar inside len
+              xpad: 10,
+              yanchor: 'middle',
+              y: 0.5, // centered on the plot region (paper coords)
+              outlinecolor: 'black',
+              outlinewidth: 1,
+              ticks: 'outside',
+              ticklen: 3,
+              tickfont: { size: 9 },
+            },
           },
         ]
-        const layout = squareLayout(i, xmin, xmax, size, sameRange ? 12 : 74)
+        const layout = squareLayout(i, xmin, xmax, size, IMG_RIGHT_MARGIN)
         return (
           <div key={i} className="square-plot">
             <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
@@ -318,15 +336,22 @@ export function DiagramPanel() {
 export function ImagePanel() {
   const results = useStore((s) => s.results)
   const sameRange = useStore((s) => s.ui.sameRange)
-  const setUi = useStore((s) => s.setUi)
-  const { ref, size } = useSquareSize((results?.d ?? 2) + 1, sameRange ? 12 : 74, 26)
+  const { ref, size } = useSquareSize((results?.d ?? 2) + 1, IMG_RIGHT_MARGIN)
   return (
     <div className="plots" ref={ref}>
-      <label className="row image-options">
-        <input type="checkbox" checked={sameRange} onChange={(e) => setUi({ sameRange: e.target.checked })} />
-        shared range
-      </label>
       {results && <ImagePlots results={results} sameRange={sameRange} size={size} />}
     </div>
+  )
+}
+
+// Lives in the panel header's tab bar while the image tab is active.
+export function SharedRangeToggle() {
+  const sameRange = useStore((s) => s.ui.sameRange)
+  const setUi = useStore((s) => s.setUi)
+  return (
+    <label className="row">
+      <input type="checkbox" checked={sameRange} onChange={(e) => setUi({ sameRange: e.target.checked })} />
+      shared scale
+    </label>
   )
 }

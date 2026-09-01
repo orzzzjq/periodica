@@ -50,7 +50,15 @@ interface DragGhost {
   y: number
 }
 
-function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<PanelId, HTMLDivElement> }) {
+function GroupWindow({
+  group,
+  holders,
+  headerExtra,
+}: {
+  group: PanelGroup
+  holders: Record<PanelId, HTMLDivElement>
+  headerExtra?: ReactNode
+}) {
   const bringToFront = usePanelStore((s) => s.bringToFront)
   const moveGroup = usePanelStore((s) => s.moveGroup)
   const resizeGroup = usePanelStore((s) => s.resizeGroup)
@@ -93,7 +101,7 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
   }, [])
 
   const onHeaderPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.tab, .win-btn')) return
+    if ((e.target as HTMLElement).closest('.tab, .win-btn, .header-extra')) return
     e.preventDefault()
     bringToFront(group.id)
     const { x, y } = group
@@ -171,6 +179,7 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
               {PANEL_TITLES[id]}
             </button>
           ))}
+          {headerExtra && <div className="header-extra">{headerExtra}</div>}
         </div>
         <button className="win-btn" title="minimize to app bar" onClick={() => toggleMinimize(group.id)}>
           —
@@ -189,7 +198,14 @@ function GroupWindow({ group, holders }: { group: PanelGroup; holders: Record<Pa
   )
 }
 
-export default function PanelHost({ contents }: { contents: Record<PanelId, ReactNode> }) {
+export default function PanelHost({
+  contents,
+  headerExtras = {},
+}: {
+  contents: Record<PanelId, ReactNode>
+  // rendered in a group's tab bar, after the last tab, while that panel is active
+  headerExtras?: Partial<Record<PanelId, ReactNode>>
+}) {
   const groups = usePanelStore((s) => s.groups)
 
   // One stable, never-reparented-by-React DOM node per panel: the content is
@@ -225,7 +241,7 @@ export default function PanelHost({ contents }: { contents: Record<PanelId, Reac
       </div>
       <div className="panel-host">
         {Object.values(groups).map((g) => (
-          <GroupWindow key={g.id} group={g} holders={holders} />
+          <GroupWindow key={g.id} group={g} holders={holders} headerExtra={headerExtras[g.active]} />
         ))}
         {PANEL_IDS.map((id) => createPortal(contents[id], holders[id]))}
       </div>
