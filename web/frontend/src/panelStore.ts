@@ -45,8 +45,11 @@ interface PanelState {
   mergeGroups: (src: string, dst: string) => void
   moveTab: (srcGid: string, panel: PanelId, dstGid: string) => void
   detachTab: (gid: string, panel: PanelId, x: number, y: number) => void
+  adaptDescriptorHeights: (oldH: number, newH: number) => void
   resetLayout: () => void
 }
+
+const DESC_PANELS: PanelId[] = ['barcode', 'diagram', 'image']
 
 let idCounter = 0
 const newId = () => `g${Date.now().toString(36)}-${idCounter++}`
@@ -57,17 +60,24 @@ function clampPos(x: number, y: number, w: number): [number, number] {
   return [Math.min(Math.max(x, -w + 80), vw - 60), Math.min(Math.max(y, 0), vh - HEADER_H)]
 }
 
+const GAP = 12
+
+// Minimal descriptor-window height that fully shows n plots: every
+// descriptor plot is 196px tall at minimum (154px region + 8/34 margins);
+// body needs n x 196 + 10, plus header 32 and border 2.
+export function descHeightFor(nPlots: number): number {
+  const vh = Math.max(window.innerHeight - APP_BAR_H, 500)
+  return Math.min(nPlots * 196 + 44, vh - 2 * GAP)
+}
+
 function defaultLayout(): Record<string, PanelGroup> {
   const vw = Math.max(window.innerWidth, 1100)
-  const vh = Math.max(window.innerHeight - APP_BAR_H, 500)
-  const gap = 12
+  const gap = GAP
 
-  // All three descriptor windows share the minimal height that fully shows
-  // the d+1 plots: every descriptor plot is 196px tall at minimum (154px
-  // region + 8/34 margins); body needs n x 196 + 10, plus header 32 and
-  // border 2.
   const nPlots = useStore.getState().inputs.d + 1
-  const descH = Math.min(nPlots * 196 + 44, vh - 2 * gap)
+  const descH = descHeightFor(nPlots)
+  // Input/Visualization keep the same default size regardless of dimension
+  const mainH = descHeightFor(3)
 
   const inputW = 300
   const diagramW = 240 // 46 + 154 + 12 margins + chrome
@@ -84,8 +94,8 @@ function defaultLayout(): Record<string, PanelGroup> {
   }
 
   const groups: PanelGroup[] = [
-    { id: newId(), x: at(inputW), y: gap, w: inputW, h: descH, z: 1, minimized: false, tabs: ['input'], active: 'input' },
-    { id: newId(), x: at(sceneW), y: gap, w: sceneW, h: descH, z: 2, minimized: false, tabs: ['scene'], active: 'scene' },
+    { id: newId(), x: at(inputW), y: gap, w: inputW, h: mainH, z: 1, minimized: false, tabs: ['input'], active: 'input' },
+    { id: newId(), x: at(sceneW), y: gap, w: sceneW, h: mainH, z: 2, minimized: false, tabs: ['scene'], active: 'scene' },
     { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode'], active: 'barcode' },
     { id: newId(), x: at(diagramW), y: gap, w: diagramW, h: descH, z: 4, minimized: false, tabs: ['diagram'], active: 'diagram' },
     { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 5, minimized: false, tabs: ['image'], active: 'image' },
@@ -238,10 +248,31 @@ export const usePanelStore = create<PanelState>((set, get) => {
       })
     },
 
+    // Windows holding only descriptor tabs that still sit at the previous
+    // default height snap to the new one; manually resized windows keep
+    // their size.
+    adaptDescriptorHeights: (oldH, newH) =>
+      update((gs) => {
+        for (const g of Object.values(gs)) {
+          if (!g.tabs.every((t) => DESC_PANELS.includes(t))) continue
+          if (Math.abs(g.h - oldH) <= 2) g.h = newH
+        }
+      }),
+
     resetLayout: () => {
       const groups = defaultLayout()
       set({ groups, zTop: 10, dropTarget: null })
       saveLayout(groups)
     },
   }
+})
+
+// On 2D/3D switches, re-fit descriptor windows that are still at the default
+// height for the plot count (manually resized ones are left alone).
+useStore.subscribe((state, prev) => {
+  if (state.inputs.d === prev.inputs.d) return
+  usePanelStore.getState().adaptDescriptorHeights(
+    descHeightFor(prev.inputs.d + 1),
+    descHeightFor(state.inputs.d + 1),
+  )
 })
