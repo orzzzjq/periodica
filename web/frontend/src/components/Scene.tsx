@@ -2,7 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Line, MapControls, OrbitControls, OrthographicCamera } from '@react-three/drei'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import type { ComputeResponse, Polytope2D, Polytope3D } from '../api'
+import { inDirichletDomain, type ComputeResponse, type Polytope2D, type Polytope3D } from '../api'
 import { useStore } from '../store'
 
 const GREEN = '#30b830'
@@ -128,30 +128,55 @@ function QuotientArcs({ results }: { results: ComputeResponse }) {
   )
 }
 
-// Sublevel set of the Delaunay filtration: only the periodic edges whose
-// filtration value is below the current ball radius R (slider-linked).
+// Sublevel set of the Delaunay filtration: the periodic edges whose
+// filtration value is below the current ball radius R (slider-linked),
+// replicated by lattice translations across the 3x Dirichlet domain.
 function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const z = results.d === 2 ? 0.002 : 0
-  // tolerance: the slider bounds come from the barcodes, which match edge
-  // filtration values only up to floating-point rounding
-  const eps = 1e-9 * Math.max(1, Math.abs(radius))
-  return (
-    <>
-      {results.quotientArcs.map((arc, i) =>
-        arc.filtration <= radius + eps ? (
-          <Line
-            key={i}
-            points={[
-              [arc.start[0], arc.start[1], (arc.start[2] ?? 0) + z],
-              [arc.end[0], arc.end[1], (arc.end[2] ?? 0) + z],
-            ]}
-            color={BLUE}
-            lineWidth={5}
-          />
-        ) : null,
-      )}
-    </>
-  )
+  const segments = useMemo(() => {
+    const { d, basis, domainA, domainB, quotientArcs } = results
+    // tolerance: the slider bounds come from the barcodes, which match edge
+    // filtration values only up to floating-point rounding
+    const eps = 1e-9 * Math.max(1, Math.abs(radius))
+    const zLift = d === 2 ? 0.002 : 0
+    const pts: [number, number, number][] = []
+    for (const arc of quotientArcs) {
+      if (arc.filtration > radius + eps) continue
+      // BFS over lattice shifts z in [-3,3]^d starting from the canonical
+      // copy: a copy is kept iff both endpoints lie in the 3x domain, and
+      // (convexity) a direction is never extended past its first
+      // out-of-domain copy.
+      const seen = new Set<string>()
+      const queue: number[][] = [new Array(d).fill(0)]
+      seen.add(queue[0].join(','))
+      while (queue.length) {
+        const z = queue.pop()!
+        const t = [0, 0, 0]
+        for (let k = 0; k < d; k++) for (let j = 0; j < d; j++) t[j] += z[k] * basis[k][j]
+        const a = [arc.start[0] + t[0], arc.start[1] + t[1], (arc.start[2] ?? 0) + t[2]]
+        const b = [arc.end[0] + t[0], arc.end[1] + t[1], (arc.end[2] ?? 0) + t[2]]
+        if (!inDirichletDomain(a, domainA, domainB) || !inDirichletDomain(b, domainA, domainB))
+          continue
+        pts.push([a[0], a[1], a[2] + zLift], [b[0], b[1], b[2] + zLift])
+        for (let k = 0; k < d; k++)
+          for (const step of [1, -1]) {
+            const nz = [...z]
+            nz[k] += step
+            if (Math.abs(nz[k]) > 3) continue
+            const key = nz.join(',')
+            if (!seen.has(key)) {
+              seen.add(key)
+              queue.push(nz)
+            }
+          }
+      }
+    }
+    return pts
+  }, [results, radius])
+
+  if (segments.length === 0) return null
+  // one LineSegments2 for all copies: per-copy <Line> components would
+  // rebuild hundreds of geometries on every slider tick
+  return <Line points={segments} segments color={BLUE} lineWidth={5} />
 }
 
 const RED = '#dd2222'
