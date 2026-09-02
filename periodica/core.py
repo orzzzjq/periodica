@@ -65,7 +65,9 @@ class Periodica:
         if self.hidden_points:
             print(f'[WARNING] {len(self.hidden_points)} hidden point(s) dropped from weighted Delaunay: {self.hidden_points}')
         self.n_quotient_vertices = len(self.kept_points)
-        self.quotient_vertex_filtration = -np.sqrt(self.weights[self.kept_points])
+        # Power-distance scale: a vertex enters the filtration when its ball
+        # {x : ||x - p_i||^2 - w_i <= f} appears, i.e. at f = -w_i.
+        self.quotient_vertex_filtration = -self.weights[self.kept_points]
 
     @timing
     def periodic_voronoi(self):
@@ -457,7 +459,10 @@ class Periodica:
 
         show_slidebar = slidebar and not ax
         inf = np.inf
-        max_radius = max(map(lambda x: x if x < inf else -inf, self.quotient_arc_filtration))
+        # Slider range on the power-distance scale: from the earliest vertex
+        # birth (-max weight) to the largest finite arc filtration value.
+        max_filtration = max(map(lambda x: x if x < inf else -inf, self.quotient_arc_filtration))
+        min_filtration = min(0.0, float(np.min(self.quotient_vertex_filtration)))
 
         if not ax:
             fig = plt.figure()
@@ -499,20 +504,23 @@ class Periodica:
                 host_fig = ax.figure
                 host_fig.subplots_adjust(bottom=0.2)
                 slider_ax = host_fig.add_axes([0.2, 0.08, 0.6, 0.04])
-                radius_slider = Slider(slider_ax, 'R', 0, max_radius, valinit=0.0)
+                filtration_slider = Slider(slider_ax, 'f', min_filtration, max_filtration, valinit=0.0)
+                # The sublevel set of the power distance at f is the union of
+                # balls of radius sqrt(f + w_i); the ball for point i only
+                # exists once f >= -w_i.
                 circles = []
                 for i in range(P.shape[1]):
                     circle = Circle((P[0, i], P[1, i]), radius=np.sqrt(self.weights[I[i]]), fill=True, color='#aaaaaa', alpha=1, zorder=0.5)
                     ax.add_patch(circle)
                     circles.append(circle)
 
-                def update_radius(radius):
+                def update_filtration(f):
                     for i in range(len(circles)):
-                        circles[i].set_radius(radius + np.sqrt(self.weights[I[i]]))
+                        circles[i].set_radius(np.sqrt(max(f + self.weights[I[i]], 0.0)))
                     ax.figure.canvas.draw_idle()
 
-                radius_slider.on_changed(update_radius)
-                self._voronoi_radius_slider = radius_slider
+                filtration_slider.on_changed(update_filtration)
+                self._delaunay_filtration_slider = filtration_slider
         
         else:
             if not ax:
@@ -567,7 +575,10 @@ class Periodica:
             self.U, self.points, self.weights, use_circumcenter
         )
 
-        max_radius = np.sqrt(-np.min(point_filtrations))
+        # Voronoi point filtrations are negated power values; the largest
+        # power value over all Voronoi vertices bounds the Delaunay slider.
+        max_filtration = -np.min(point_filtrations)
+        min_filtration = min(0.0, -float(np.max(self.weights)))
 
         if self.d == 2:
             if not ax:
@@ -605,20 +616,21 @@ class Periodica:
                 host_fig = ax.figure
                 host_fig.subplots_adjust(bottom=0.2)
                 slider_ax = host_fig.add_axes([0.2, 0.08, 0.6, 0.04])
-                radius_slider = Slider(slider_ax, 'R', 0.0, max_radius, valinit=0.0)
+                filtration_slider = Slider(slider_ax, 'f', min_filtration, max_filtration, valinit=0.0)
+                # Same power-scale balls as plot_delaunay: radius sqrt(f + w_i).
                 circles = []
                 for i in range(P.shape[1]):
                     circle = Circle((P[0, i], P[1, i]), radius=np.sqrt(self.weights[I[i]]), fill=True, color='#aaaaaa', alpha=1, zorder=0.5)
                     ax.add_patch(circle)
                     circles.append(circle)
 
-                def update_radius(radius):
+                def update_filtration(f):
                     for i in range(len(circles)):
-                        circles[i].set_radius(radius + np.sqrt(self.weights[I[i]]))
+                        circles[i].set_radius(np.sqrt(max(f + self.weights[I[i]], 0.0)))
                     ax.figure.canvas.draw_idle()
 
-                radius_slider.on_changed(update_radius)
-                self._voronoi_radius_slider = radius_slider
+                filtration_slider.on_changed(update_filtration)
+                self._voronoi_filtration_slider = filtration_slider
         
         else:
             if not ax:

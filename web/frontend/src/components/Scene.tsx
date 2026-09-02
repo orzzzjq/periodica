@@ -174,8 +174,8 @@ function tile3xSegments(
 const filtEps = (radius: number) => 1e-9 * Math.max(1, Math.abs(radius))
 
 // Sublevel set of the Delaunay filtration: the periodic edges whose
-// filtration value is below the current ball radius R (slider-linked),
-// tiled across the 3x Dirichlet domain.
+// power-scale filtration value is below the current threshold f_Del
+// (slider-linked), tiled across the 3x Dirichlet domain.
 function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
   const segments = useMemo(() => {
     const arcs = results.quotientArcs.filter((a) => a.filtration <= radius + filtEps(radius))
@@ -252,9 +252,9 @@ function VoronoiPoints({ results }: { results: ComputeResponse }) {
 }
 
 // Sublevel set of the Voronoi filtration at f_Vor (the Voronoi filtration
-// lives on the negated radius scale, so thresholds are typically negative):
-// the part of the Voronoi diagram not yet covered by the growing balls,
-// tiled across the 3x domain.
+// lives on the negated power-distance scale, so thresholds are typically
+// negative): the part of the Voronoi diagram not yet covered by the growing
+// balls, tiled across the 3x domain.
 function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
   const segments = useMemo(() => {
     const g = results.voronoiGeometry
@@ -341,18 +341,20 @@ function Balls({
   )
 }
 
-// Delaunay filtration balls: radius f_Del + sqrt(w), light blue.
+// Delaunay filtration balls, light blue. The sublevel set of the power
+// distance f_i(x) = ||x - p_i||^2 - w_i at f_Del is the union of balls of
+// radius sqrt(f_Del + w_i); point i has no ball until f_Del >= -w_i.
 function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
   const { positions3x, originalIndex, weights, hidden } = results.points
   const hiddenSet = useMemo(() => new Set(hidden), [hidden])
-  if (radius <= 0 && weights.every((w) => w === 0)) return null
   const items: { p: number[]; r: number }[] = []
   positions3x.forEach((p, i) => {
     const orig = originalIndex[i]
     if (hiddenSet.has(orig)) return
-    const r = radius + Math.sqrt(weights[orig])
-    if (r > 0) items.push({ p, r })
+    const r2 = radius + weights[orig]
+    if (r2 > 0) items.push({ p, r: Math.sqrt(r2) })
   })
+  if (items.length === 0) return null
   return <Balls items={items} is2d={results.d === 2} color="#8fb0e8" stencilRef={1} z2d={-0.01} />
 }
 

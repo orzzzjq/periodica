@@ -92,10 +92,11 @@ def test_2d_unweighted_control():
 
 
 def test_large_weight_negative_filtration():
-    # A weight large enough that some weighted alpha values are negative
-    # (e.g. two copies of a w=0.5 point at distance 1: alpha = 0.25 - 0.5).
-    # The filtration must use a signed sqrt, never producing NaN. Point 0
-    # is also hidden here (dist^2 = 0.04 <= 0.5).
+    # A weight large enough that some weighted alpha (power) values are
+    # negative (e.g. two copies of a w=0.5 point at distance 1: alpha =
+    # 0.25 - 0.5). Filtration values are kept on the power-distance scale,
+    # so they stay negative and must never be NaN. Point 0 is also hidden
+    # here (dist^2 = 0.04 <= 0.5).
     points = np.array([
         [0.5, 0.5],
         [0.3, 0.5],
@@ -104,10 +105,10 @@ def test_large_weight_negative_filtration():
     assert p.hidden_points == [0], f'expected point 0 hidden, got {p.hidden_points}'
     filt = np.asarray(p.quotient_arc_filtration)
     assert not np.isnan(filt).any(), f'NaN in arc filtrations: {filt}'
-    assert (filt < 0).any(), 'expected some negative (signed-sqrt) filtration values'
+    assert (filt < 0).any(), 'expected some negative (power-scale) filtration values'
     n_inf = count_infinite_bars(p)
     assert n_inf == 1, f'expected exactly 1 infinite bar, got {n_inf}'
-    print('PASS large weight (negative alpha, signed sqrt)')
+    print('PASS large weight (negative power-scale alpha values)')
 
 
 def test_plot_delaunay_arc_positions():

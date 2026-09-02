@@ -62,7 +62,7 @@ export default function RadiusSlider() {
   if (dMax <= dMin) dMax = dMin + 1
 
   // f_Vor: from the earliest Voronoi birth to the Voronoi barcode's xmax
-  // (both on the negated radius scale, so typically negative).
+  // (both on the negated power-distance scale, so typically negative).
   let vor: { min: number; max: number } | null = null
   if (results?.voronoi) {
     let vMin = minBirth(results.voronoi.barcodes)

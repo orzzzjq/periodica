@@ -10,8 +10,8 @@ export interface Inputs {
 }
 
 interface UiState {
-  radius: number // f_Del: Delaunay filtration threshold
-  radiusVor: number // f_Vor: Voronoi filtration threshold (negated radius scale)
+  radius: number // f_Del: Delaunay filtration threshold (power-distance scale)
+  radiusVor: number // f_Vor: Voronoi filtration threshold (negated power-distance scale)
   showPoints: boolean
   showBasis: boolean
   showDomains: boolean
