@@ -58,6 +58,8 @@ export interface ComputeResponse {
   basis: number[][] // reduced basis vectors as rows
   domain1x: Polytope
   domain3x: Polytope
+  domainA: number[][] // Dirichlet domain halfspaces: A·x <= b (1x), A·x <= 3b (3x)
+  domainB: number[]
   points: {
     positions3x: number[][]
     originalIndex: number[]
@@ -71,6 +73,21 @@ export interface ComputeResponse {
   maxRadius: number
   barcodes: Bar[][] // d+1 lists (Delaunay)
   images: ImagesData // (Delaunay)
+}
+
+/** True iff p satisfies A·x <= scale·b, i.e. lies in the scaled Dirichlet
+ * domain (scale 1 = fundamental domain, 3 = the 3x construction domain). */
+export function inDirichletDomain(
+  p: number[],
+  A: number[][],
+  b: number[],
+  scale = 3,
+  eps = 1e-9,
+): boolean {
+  return A.every((row, i) => {
+    const dot = row.reduce((s, a, j) => s + a * (p[j] ?? 0), 0)
+    return dot <= scale * b[i] + eps
+  })
 }
 
 export async function compute(req: ComputeRequest): Promise<ComputeResponse> {

@@ -211,6 +211,10 @@ def compute(req: ComputeRequest):
         'basis': V[:, :d].T.tolist(),  # basis vectors as rows
         'domain1x': polytope(d, p.domain_vertices(A, b)),
         'domain3x': polytope(d, p.domain_vertices(A, b * 3)),
+        # Halfspace representation of the Dirichlet domain: x is inside the
+        # 1x domain iff A·x <= b, inside the 3x domain iff A·x <= 3b.
+        'domainA': A.tolist(),
+        'domainB': b.reshape(-1).tolist(),
         'points': {
             'positions3x': P_full.T.tolist(),
             'originalIndex': np.asarray(I).reshape(-1).tolist(),
