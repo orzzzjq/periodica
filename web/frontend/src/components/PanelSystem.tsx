@@ -202,10 +202,13 @@ function GroupWindow({
 export default function PanelHost({
   contents,
   headerExtras = {},
+  appBarExtra,
 }: {
   contents: Record<PanelId, ReactNode>
   // rendered in a group's tab bar, after the last tab, while that panel is active
   headerExtras?: Partial<Record<PanelId, ReactNode>>
+  // rendered at the right side of the app bar, before the reset button
+  appBarExtra?: ReactNode
 }) {
   const groups = usePanelStore((s) => s.groups)
 
@@ -243,9 +246,12 @@ export default function PanelHost({
             </button>
           ))}
         </div>
-        <button className="chip app-bar-right" onClick={resetLayout}>
-          reset layout
-        </button>
+        <div className="app-bar-right">
+          {appBarExtra}
+          <button className="chip" onClick={resetLayout}>
+            reset layout
+          </button>
+        </div>
       </div>
       <div className="panel-host">
         {Object.values(groups).map((g) => (

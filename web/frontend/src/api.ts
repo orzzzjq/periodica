@@ -32,8 +32,22 @@ export interface Bar {
   multiplicity: number
 }
 
+export interface ImagesData {
+  size: number
+  xmin: number
+  xmax: number
+  data: number[][][] // d+1 images
+}
+
+export interface Descriptors {
+  barcodes: Bar[][] // d+1 lists
+  images: ImagesData
+}
+
 export interface ComputeResponse {
   d: 2 | 3
+  voronoi: Descriptors | null
+  voronoiError: string | null
   basis: number[][] // reduced basis vectors as rows
   domain1x: Polytope
   domain3x: Polytope
@@ -48,13 +62,8 @@ export interface ComputeResponse {
   fullEdges: number[][] // index pairs into positions3x
   quotientArcs: QuotientArc[]
   maxRadius: number
-  barcodes: Bar[][] // d+1 lists
-  images: {
-    size: number
-    xmin: number
-    xmax: number
-    data: number[][][] // d+1 images
-  }
+  barcodes: Bar[][] // d+1 lists (Delaunay)
+  images: ImagesData // (Delaunay)
 }
 
 export async function compute(req: ComputeRequest): Promise<ComputeResponse> {

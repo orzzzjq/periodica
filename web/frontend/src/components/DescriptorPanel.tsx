@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout } from 'plotly.js'
 import createPlotlyComponent from 'react-plotly.js/factory'
-import type { Bar, ComputeResponse } from '../api'
+import type { Bar, Descriptors, ImagesData } from '../api'
 import { useStore } from '../store'
 
 const Plot = createPlotlyComponent(Plotly)
@@ -155,8 +155,8 @@ function useSquareSize(nPlots: number, rightMargin: number, extraTop = 0) {
   return { ref, size }
 }
 
-function BarcodePlots({ results, width, radius }: { results: ComputeResponse; width: number; radius: number }) {
-  const [xmin, xmax] = xRange(results.barcodes, 0.12, 0.05)
+function BarcodePlots({ barcodes, width, radius }: { barcodes: Bar[][]; width: number; radius: number }) {
+  const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
   // live filtration cursor linked to the visualization slider
   const radiusLine: Partial<Layout>['shapes'] =
     radius > 1e-9
@@ -173,11 +173,11 @@ function BarcodePlots({ results, width, radius }: { results: ComputeResponse; wi
         ]
       : []
   // highest exponent on top, like plot_barcodes
-  const dims = [...results.barcodes.keys()].reverse()
+  const dims = [...barcodes.keys()].reverse()
   return (
     <>
       {dims.map((i) => {
-        const bars = results.barcodes[i]
+        const bars = barcodes[i]
         const traces: Data[] = bars.map((b, j) => ({
           x: [b.birth, b.death ?? xmax],
           y: [-j, -j],
@@ -216,13 +216,13 @@ function BarcodePlots({ results, width, radius }: { results: ComputeResponse; wi
   )
 }
 
-function DiagramPlots({ results, size }: { results: ComputeResponse; size: number }) {
-  const [xmin, xmax] = xRange(results.barcodes, 0.12, 0.12)
-  const dims = [...results.barcodes.keys()].reverse()
+function DiagramPlots({ barcodes, size }: { barcodes: Bar[][]; size: number }) {
+  const [xmin, xmax] = xRange(barcodes, 0.12, 0.12)
+  const dims = [...barcodes.keys()].reverse()
   return (
     <>
       {dims.map((i) => {
-        const bars = results.barcodes[i]
+        const bars = barcodes[i]
         const finite = bars.filter((b) => b.death !== null)
         const infinite = bars.filter((b) => b.death === null)
         const traces: Data[] = [
@@ -271,8 +271,8 @@ function DiagramPlots({ results, size }: { results: ComputeResponse; size: numbe
   )
 }
 
-function ImagePlots({ results, sameRange, size }: { results: ComputeResponse; sameRange: boolean; size: number }) {
-  const { xmin, xmax, data, size: gridSize } = results.images
+function ImagePlots({ images, sameRange, size }: { images: ImagesData; sameRange: boolean; size: number }) {
+  const { xmin, xmax, data, size: gridSize } = images
   const axis = useMemo(
     () => Array.from({ length: gridSize }, (_, k) => xmin + ((k + 0.5) / gridSize) * (xmax - xmin)),
     [xmin, xmax, gridSize],
@@ -329,36 +329,56 @@ function ImagePlots({ results, sameRange, size }: { results: ComputeResponse; sa
   )
 }
 
-// Standalone panel bodies for the floating-panel system.
+// Standalone panel bodies for the floating-panel system. The app-bar
+// Delaunay/Voronoi toggle selects which complex's descriptors they show.
+
+function useDescriptors(): { desc: Descriptors | null; error: string | null } {
+  const results = useStore((s) => s.results)
+  const which = useStore((s) => s.ui.complexType)
+  if (!results) return { desc: null, error: null }
+  if (which === 'voronoi') {
+    return { desc: results.voronoi, error: results.voronoi ? null : (results.voronoiError ?? 'Voronoi unavailable') }
+  }
+  return { desc: { barcodes: results.barcodes, images: results.images }, error: null }
+}
+
+function DescError({ error }: { error: string | null }) {
+  return error ? <div className="desc-error">Voronoi computation failed: {error}</div> : null
+}
 
 export function BarcodePanel() {
-  const results = useStore((s) => s.results)
+  const { desc, error } = useDescriptors()
   const radius = useStore((s) => s.ui.radius)
   const { ref, width } = usePanelWidth()
   return (
     <div className="plots" ref={ref}>
-      {results && <BarcodePlots results={results} width={width} radius={radius} />}
+      <DescError error={error} />
+      {desc && <BarcodePlots barcodes={desc.barcodes} width={width} radius={radius} />}
     </div>
   )
 }
 
 export function DiagramPanel() {
   const results = useStore((s) => s.results)
+  const { desc, error } = useDescriptors()
   const { ref, size } = useSquareSize((results?.d ?? 2) + 1, 12)
   return (
     <div className="plots" ref={ref}>
-      {results && <DiagramPlots results={results} size={size} />}
+      <DescError error={error} />
+      {desc && <DiagramPlots barcodes={desc.barcodes} size={size} />}
     </div>
   )
 }
 
 export function ImagePanel() {
   const results = useStore((s) => s.results)
+  const { desc, error } = useDescriptors()
   const sameRange = useStore((s) => s.ui.sameRange)
   const { ref, size } = useSquareSize((results?.d ?? 2) + 1, IMG_RIGHT_MARGIN)
   return (
     <div className="plots" ref={ref}>
-      {results && <ImagePlots results={results} sameRange={sameRange} size={size} />}
+      <DescError error={error} />
+      {desc && <ImagePlots images={desc.images} sameRange={sameRange} size={size} />}
     </div>
   )
 }

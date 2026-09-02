@@ -54,6 +54,30 @@
 
 .app-bar-right {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chip.active {
+  background: #2255cc;
+  border-color: #2255cc;
+  color: #fff;
+}
+
+.complex-toggle {
+  display: flex;
+  gap: 0;
+  margin-right: 10px;
+}
+
+.complex-toggle .chip:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.complex-toggle .chip:last-child {
+  border-radius: 0 4px 4px 0;
+  border-left: none;
 }
 
 .panel-host {
@@ -369,4 +393,10 @@ button:disabled {
 .square-plot {
   display: flex;
   justify-content: center;
+}
+
+.desc-error {
+  color: #b00020;
+  font-size: 12px;
+  padding: 8px;
 }

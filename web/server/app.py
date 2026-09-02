@@ -146,13 +146,39 @@ def compute(req: ComputeRequest):
             'multiplicity': float(multiplicity),
         }
 
-    # x-range of the persistence images, matching Periodica.images()
-    xmin = min(min(bar[0] for bar in bars) for bars in barcodes)
-    xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes)
-    xspan = xmax - xmin
-    img_xmin, img_xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
+    def encode_descriptors(barcodes, images):
+        # x-range of the persistence images, matching Periodica.images()
+        xmin = min(min(bar[0] for bar in bars) for bars in barcodes)
+        xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes)
+        xspan = xmax - xmin
+        return {
+            'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
+            'images': {
+                'size': req.imageSize,
+                'xmin': float(xmin - 0.12 * xspan),
+                'xmax': float(xmax + 0.12 * xspan),
+                'data': [np.asarray(img).tolist() for img in images],
+            },
+        }
+
+    # Voronoi descriptors (independent pipeline; failures don't break the response)
+    voronoi = None
+    voronoi_error = None
+    try:
+        q = Periodica()
+        q.set_geometry({'d': d, 'U': U, 'n_points': points.shape[1],
+                        'points': points, 'weights': weights})
+        q.quotient_complex('voronoi')
+        q.merge_tree()
+        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize))
+    except Exception as e:
+        voronoi_error = str(e)
+
+    delaunay_desc = encode_descriptors(barcodes, images)
 
     return {
+        'voronoi': voronoi,
+        'voronoiError': voronoi_error,
         'd': d,
         'basis': V[:, :d].T.tolist(),  # basis vectors as rows
         'domain1x': polytope(d, p.domain_vertices(A, b)),
@@ -168,13 +194,8 @@ def compute(req: ComputeRequest):
         'fullEdges': np.asarray(full_edges).tolist(),
         'quotientArcs': arcs,
         'maxRadius': float(max_radius),
-        'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
-        'images': {
-            'size': req.imageSize,
-            'xmin': float(img_xmin),
-            'xmax': float(img_xmax),
-            'data': [np.asarray(img).tolist() for img in images],
-        },
+        'barcodes': delaunay_desc['barcodes'],
+        'images': delaunay_desc['images'],
     }
 
 

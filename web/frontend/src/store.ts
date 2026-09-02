@@ -20,6 +20,7 @@ interface UiState {
   ballOpacity: number
   sameRange: boolean
   imageSize: number
+  complexType: 'delaunay' | 'voronoi'
 }
 
 interface State {
@@ -85,6 +86,7 @@ export const useStore = create<State>((set, get) => {
       ballOpacity: 0.35,
       sameRange: true,
       imageSize: 100,
+      complexType: 'delaunay',
     },
 
     setUi: (partial) => {
