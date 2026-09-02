@@ -128,6 +128,52 @@ function QuotientArcs({ results }: { results: ComputeResponse }) {
   )
 }
 
+const RED = '#dd2222'
+
+function VoronoiSkeleton({ results }: { results: ComputeResponse }) {
+  const g = results.voronoiGeometry
+  const z = results.d === 2 ? 0.003 : 0
+  const geometry = useMemo(() => {
+    if (!g) return null
+    const pos: number[] = []
+    for (const [s, t] of g.fullEdges) {
+      const a = g.points3x[s]
+      const b = g.points3x[t]
+      pos.push(a[0], a[1], (a[2] ?? 0) + z, b[0], b[1], (b[2] ?? 0) + z)
+    }
+    const geom = new THREE.BufferGeometry()
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    return geom
+  }, [g, z])
+  if (!geometry) return null
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color={RED} transparent opacity={0.35} />
+    </lineSegments>
+  )
+}
+
+function VoronoiArcs({ results }: { results: ComputeResponse }) {
+  const g = results.voronoiGeometry
+  if (!g) return null
+  const z = results.d === 2 ? 0.004 : 0
+  return (
+    <>
+      {g.arcs.map((arc, i) => (
+        <Line
+          key={i}
+          points={[
+            [arc.start[0], arc.start[1], (arc.start[2] ?? 0) + z],
+            [arc.end[0], arc.end[1], (arc.end[2] ?? 0) + z],
+          ]}
+          color={RED}
+          lineWidth={2.5}
+        />
+      ))}
+    </>
+  )
+}
+
 function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
   const { positions3x, originalIndex, weights, hidden } = results.points
   const hiddenSet = useMemo(() => new Set(hidden), [hidden])
@@ -231,6 +277,8 @@ export default function Scene() {
         ))}
       {ui.showFullSkeleton && <FullSkeleton results={results} />}
       {ui.showArcs && <QuotientArcs results={results} />}
+      {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
+      {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
       {ui.showPoints && <Points results={results} />}
       {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
     </Canvas>
@@ -244,6 +292,8 @@ const DISPLAY_TOGGLES = [
   { key: 'showDomains', label: 'Dirichlet domains' },
   { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
   { key: 'showArcs', label: 'periodic Delaunay edges' },
+  { key: 'showVoronoiSkeleton', label: 'full Voronoi skeleton' },
+  { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
   { key: 'showBalls', label: 'filtration balls' },
 ] as const
 

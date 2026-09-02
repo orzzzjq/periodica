@@ -44,10 +44,17 @@ export interface Descriptors {
   images: ImagesData
 }
 
+export interface VoronoiGeometry {
+  points3x: number[][] // full dual-skeleton vertices (circumcenters)
+  fullEdges: number[][] // index pairs into points3x
+  arcs: { start: number[]; end: number[]; filtration: number }[] // resolved periodic Voronoi edges
+}
+
 export interface ComputeResponse {
   d: 2 | 3
   voronoi: Descriptors | null
   voronoiError: string | null
+  voronoiGeometry: VoronoiGeometry | null
   basis: number[][] // reduced basis vectors as rows
   domain1x: Polytope
   domain3x: Polytope

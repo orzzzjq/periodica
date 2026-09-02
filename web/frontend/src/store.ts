@@ -16,6 +16,8 @@ interface UiState {
   showDomains: boolean
   showFullSkeleton: boolean
   showArcs: boolean
+  showVoronoiSkeleton: boolean
+  showVoronoiArcs: boolean
   showBalls: boolean
   ballOpacity: number
   sameRange: boolean
@@ -82,6 +84,8 @@ export const useStore = create<State>((set, get) => {
       showDomains: true,
       showFullSkeleton: true,
       showArcs: true,
+      showVoronoiSkeleton: true,
+      showVoronoiArcs: true,
       showBalls: true,
       ballOpacity: 0.35,
       sameRange: true,

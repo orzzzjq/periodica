@@ -174,11 +174,36 @@ def compute(req: ComputeRequest):
     except Exception as e:
         voronoi_error = str(e)
 
+    # Voronoi geometry for the scene overlay (circumcenter-based cell centers),
+    # mirroring plot_voronoi: full dual skeleton + resolved periodic edges.
+    voronoi_geometry = None
+    try:
+        vor_pts, vor_edges = _periodica.full_voronoi(U, points, weights, True)
+        cvp, pv_edges, _pv_pf, pv_ef, pv_shift = _periodica.periodic_voronoi(U, points, weights, True)
+        varcs = []
+        for i in range(pv_edges.shape[0]):
+            s, t = int(pv_edges[i, 0]), int(pv_edges[i, 1])
+            start = cvp[:, s]
+            end = cvp[:, t] + V[:, :-1] @ pv_shift[:, i]
+            varcs.append({
+                'start': start.tolist(),
+                'end': end.tolist(),
+                'filtration': float(pv_ef[i]),
+            })
+        voronoi_geometry = {
+            'points3x': vor_pts.T.tolist(),
+            'fullEdges': np.asarray(vor_edges).tolist(),
+            'arcs': varcs,
+        }
+    except Exception:
+        voronoi_geometry = None
+
     delaunay_desc = encode_descriptors(barcodes, images)
 
     return {
         'voronoi': voronoi,
         'voronoiError': voronoi_error,
+        'voronoiGeometry': voronoi_geometry,
         'd': d,
         'basis': V[:, :d].T.tolist(),  # basis vectors as rows
         'domain1x': polytope(d, p.domain_vertices(A, b)),
