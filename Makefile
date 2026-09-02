@@ -59,7 +59,7 @@ build:
 
 web-build:
 	@if command -v npm >/dev/null 2>&1; then \
-		if [ ! -d "$(FRONTEND_DIR)/node_modules" ]; then \
+		if [ ! -d "$(FRONTEND_DIR)/node_modules" ] || [ "$(FRONTEND_DIR)/package.json" -nt "$(FRONTEND_DIR)/node_modules/.package-lock.json" ]; then \
 			npm --prefix $(FRONTEND_DIR) install; \
 		fi; \
 		npm --prefix $(FRONTEND_DIR) run build; \
@@ -71,6 +71,10 @@ web-build:
 	fi
 
 web: web-build
+	@if [ ! -x "$(VENV_BIN)/uvicorn" ] || [ ! -f "$(SO_DST)" ]; then \
+		echo "Bootstrapping venv and native extension (first run)"; \
+		$(MAKE) requirements build; \
+	fi
 	@echo "Web UI: http://localhost:$(WEB_PORT)"
 	@if grep -qi microsoft /proc/version 2>/dev/null; then \
 		( sleep 1; \
