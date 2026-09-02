@@ -27,7 +27,9 @@ const SPECTRAL_R: [number, string][] = [
   [1.0, '#9e0142'],
 ]
 
-function xRange(barcodes: Bar[][], padLeft: number, padRight: number): [number, number] {
+// exported: the radius sliders reuse the barcode plot's x-range so their
+// bounds match the plotted xmax exactly
+export function xRange(barcodes: Bar[][], padLeft: number, padRight: number): [number, number] {
   let xmin = Infinity
   let xmax = -Infinity
   for (const bars of barcodes)
@@ -155,11 +157,11 @@ function useSquareSize(nPlots: number, rightMargin: number, extraTop = 0) {
   return { ref, size }
 }
 
-function BarcodePlots({ barcodes, width, radius }: { barcodes: Bar[][]; width: number; radius: number }) {
+function BarcodePlots({ barcodes, width, radius }: { barcodes: Bar[][]; width: number; radius: number | null }) {
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
-  // live filtration cursor linked to the visualization slider
+  // live filtration cursor linked to the visualization slider (null = hidden)
   const radiusLine: Partial<Layout>['shapes'] =
-    Math.abs(radius) > 1e-9
+    radius !== null
       ? [
           {
             type: 'line',
@@ -349,11 +351,17 @@ function DescError({ error }: { error: string | null }) {
 export function BarcodePanel() {
   const { desc, error } = useDescriptors()
   const radius = useStore((s) => s.ui.radius)
+  const radiusVor = useStore((s) => s.ui.radiusVor)
   const which = useStore((s) => s.ui.complexType)
   const { ref, width } = usePanelWidth()
-  // The Voronoi filtration runs on the negated radius scale, so the slider
-  // cursor maps to x = -R there.
-  const cursor = which === 'voronoi' ? -radius : radius
+  // Each barcode follows its own filtration slider: f_Del for Delaunay,
+  // f_Vor (already on the negated scale) for Voronoi. No cursor while a
+  // slider rests at its start position (f_Del at 0, f_Vor at its minimum).
+  let cursor: number | null = Math.abs(radius) > 1e-9 ? radius : null
+  if (which === 'voronoi') {
+    const vMin = desc ? xRange(desc.barcodes, 0, 0)[0] : -Infinity
+    cursor = Number.isFinite(radiusVor) && radiusVor > vMin + 1e-9 ? radiusVor : null
+  }
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />

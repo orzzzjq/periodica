@@ -10,7 +10,8 @@ export interface Inputs {
 }
 
 interface UiState {
-  radius: number
+  radius: number // f_Del: Delaunay filtration threshold
+  radiusVor: number // f_Vor: Voronoi filtration threshold (negated radius scale)
   showPoints: boolean
   showBasis: boolean
   showDomains: boolean
@@ -81,6 +82,9 @@ export const useStore = create<State>((set, get) => {
     error: null,
     ui: {
       radius: 0,
+      // -Infinity = "at the slider minimum" (the actual minimum depends on
+      // the computed Voronoi barcode); the UI clamps it into range
+      radiusVor: -Infinity,
       showPoints: true,
       showBasis: true,
       showDomains: true,

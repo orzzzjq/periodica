@@ -233,14 +233,15 @@ function VoronoiArcs({ results }: { results: ComputeResponse }) {
   )
 }
 
-// The Voronoi filtration runs on the negated radius scale (cursor at
-// x = -R): edges with filtration <= -R are the part of the Voronoi
-// diagram not yet covered by the growing balls, tiled across the 3x domain.
+// Sublevel set of the Voronoi filtration at f_Vor (the Voronoi filtration
+// lives on the negated radius scale, so thresholds are typically negative):
+// the part of the Voronoi diagram not yet covered by the growing balls,
+// tiled across the 3x domain.
 function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
   const segments = useMemo(() => {
     const g = results.voronoiGeometry
     if (!g) return []
-    const arcs = g.arcs.filter((a) => a.filtration <= -radius + filtEps(radius))
+    const arcs = g.arcs.filter((a) => a.filtration <= radius + filtEps(radius))
     return tile3xSegments(arcs, results, results.d === 2 ? 0.005 : 0)
   }, [results, radius])
 
@@ -364,7 +365,7 @@ export default function Scene() {
       {ui.showFullSkeleton && <FullSkeleton results={results} />}
       {ui.showArcs && <QuotientArcs results={results} />}
       {ui.showFiltrationEdges && <FiltrationEdges results={results} radius={ui.radius} />}
-      {ui.showVoronoiFiltrationEdges && <VoronoiFiltrationEdges results={results} radius={ui.radius} />}
+      {ui.showVoronoiFiltrationEdges && <VoronoiFiltrationEdges results={results} radius={ui.radiusVor} />}
       {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
       {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
       {ui.showPoints && <Points results={results} />}
