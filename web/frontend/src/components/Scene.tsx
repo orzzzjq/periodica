@@ -213,6 +213,14 @@ function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius
     }
   })
 
+  // One shared unit geometry, scaled per ball: rebuilding a SphereGeometry
+  // for every ball on every slider tick is what made dragging stutter.
+  const unitGeometry = useMemo(
+    () => (is2d ? new THREE.CircleGeometry(1, 48) : new THREE.SphereGeometry(1, 32, 32)),
+    [is2d],
+  )
+  useEffect(() => () => unitGeometry.dispose(), [unitGeometry])
+
   if (radius <= 0 && weights.every((w) => w === 0)) return null
   return (
     <group ref={groupRef}>
@@ -222,9 +230,13 @@ function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius
         const r = radius + Math.sqrt(weights[orig])
         if (r <= 0) return null
         return (
-          <mesh key={i} position={is2d ? [p[0], p[1], -0.01] : to3(p)} material={material}>
-            {is2d ? <circleGeometry args={[r, 48]} /> : <sphereGeometry args={[r, 32, 32]} />}
-          </mesh>
+          <mesh
+            key={i}
+            position={is2d ? [p[0], p[1], -0.01] : to3(p)}
+            scale={r}
+            material={material}
+            geometry={unitGeometry}
+          />
         )
       })}
     </group>

@@ -161,25 +161,28 @@ def compute(req: ComputeRequest):
             },
         }
 
-    # Voronoi descriptors (independent pipeline; failures don't break the response)
+    # Voronoi descriptors + scene geometry from a single periodic_voronoi call
+    # (circumcenter cell centers); failures don't break the response.
     voronoi = None
     voronoi_error = None
-    try:
-        q = Periodica()
-        q.set_geometry({'d': d, 'U': U, 'n_points': points.shape[1],
-                        'points': points, 'weights': weights})
-        q.quotient_complex('voronoi')
-        q.merge_tree()
-        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize))
-    except Exception as e:
-        voronoi_error = str(e)
-
-    # Voronoi geometry for the scene overlay (circumcenter-based cell centers),
-    # mirroring plot_voronoi: full dual skeleton + resolved periodic edges.
     voronoi_geometry = None
     try:
+        cvp, pv_edges, pv_pf, pv_ef, pv_shift = _periodica.periodic_voronoi(U, points, weights, True)
+
+        # descriptors: feed the quotient complex into the Periodica pipeline
+        q = Periodica()
+        q.d = d
+        q.V = V
+        q.n_quotient_vertices = cvp.shape[1]
+        q.quotient_vertex_filtration = pv_pf
+        q.quotient_arcs = pv_edges
+        q.quotient_arc_filtration = pv_ef
+        q.quotient_arc_shift = pv_shift
+        q.merge_tree()
+        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize))
+
+        # geometry overlay, mirroring plot_voronoi
         vor_pts, vor_edges = _periodica.full_voronoi(U, points, weights, True)
-        cvp, pv_edges, _pv_pf, pv_ef, pv_shift = _periodica.periodic_voronoi(U, points, weights, True)
         varcs = []
         for i in range(pv_edges.shape[0]):
             s, t = int(pv_edges[i, 0]), int(pv_edges[i, 1])
@@ -195,8 +198,8 @@ def compute(req: ComputeRequest):
             'fullEdges': np.asarray(vor_edges).tolist(),
             'arcs': varcs,
         }
-    except Exception:
-        voronoi_geometry = None
+    except Exception as e:
+        voronoi_error = str(e)
 
     delaunay_desc = encode_descriptors(barcodes, images)
 
