@@ -159,7 +159,7 @@ function BarcodePlots({ barcodes, width, radius }: { barcodes: Bar[][]; width: n
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
   // live filtration cursor linked to the visualization slider
   const radiusLine: Partial<Layout>['shapes'] =
-    radius > 1e-9
+    Math.abs(radius) > 1e-9
       ? [
           {
             type: 'line',
@@ -349,11 +349,15 @@ function DescError({ error }: { error: string | null }) {
 export function BarcodePanel() {
   const { desc, error } = useDescriptors()
   const radius = useStore((s) => s.ui.radius)
+  const which = useStore((s) => s.ui.complexType)
   const { ref, width } = usePanelWidth()
+  // The Voronoi filtration runs on the negated radius scale, so the slider
+  // cursor maps to x = -R there.
+  const cursor = which === 'voronoi' ? -radius : radius
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
-      {desc && <BarcodePlots barcodes={desc.barcodes} width={width} radius={radius} />}
+      {desc && <BarcodePlots barcodes={desc.barcodes} width={width} radius={cursor} />}
     </div>
   )
 }
