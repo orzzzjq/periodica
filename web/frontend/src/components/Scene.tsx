@@ -128,6 +128,32 @@ function QuotientArcs({ results }: { results: ComputeResponse }) {
   )
 }
 
+// Sublevel set of the Delaunay filtration: only the periodic edges whose
+// filtration value is below the current ball radius R (slider-linked).
+function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const z = results.d === 2 ? 0.002 : 0
+  // tolerance: the slider bounds come from the barcodes, which match edge
+  // filtration values only up to floating-point rounding
+  const eps = 1e-9 * Math.max(1, Math.abs(radius))
+  return (
+    <>
+      {results.quotientArcs.map((arc, i) =>
+        arc.filtration <= radius + eps ? (
+          <Line
+            key={i}
+            points={[
+              [arc.start[0], arc.start[1], (arc.start[2] ?? 0) + z],
+              [arc.end[0], arc.end[1], (arc.end[2] ?? 0) + z],
+            ]}
+            color={BLUE}
+            lineWidth={5}
+          />
+        ) : null,
+      )}
+    </>
+  )
+}
+
 const RED = '#dd2222'
 
 function VoronoiSkeleton({ results }: { results: ComputeResponse }) {
@@ -289,6 +315,7 @@ export default function Scene() {
         ))}
       {ui.showFullSkeleton && <FullSkeleton results={results} />}
       {ui.showArcs && <QuotientArcs results={results} />}
+      {ui.showFiltrationEdges && <FiltrationEdges results={results} radius={ui.radius} />}
       {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
       {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
       {ui.showPoints && <Points results={results} />}
@@ -304,6 +331,7 @@ const DISPLAY_TOGGLES = [
   { key: 'showDomains', label: 'Dirichlet domains' },
   { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
   { key: 'showArcs', label: 'periodic Delaunay edges' },
+  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)' },
   { key: 'showVoronoiSkeleton', label: 'full Voronoi skeleton' },
   { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
   { key: 'showBalls', label: 'filtration balls' },
