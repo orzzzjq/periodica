@@ -356,10 +356,10 @@ const DISPLAY_TOGGLES = [
   { key: 'showDomains', label: 'Dirichlet domains' },
   { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
   { key: 'showArcs', label: 'periodic Delaunay edges' },
-  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)' },
   { key: 'showVoronoiSkeleton', label: 'full Voronoi skeleton' },
   { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
-  { key: 'showBalls', label: 'filtration balls' },
+  { key: 'showBalls', label: 'Delaunay filtration (balls)' },
+  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)' },
 ] as const
 
 export function DisplayOptions() {
