@@ -88,7 +88,8 @@ function Points({ results }: { results: ComputeResponse }) {
         const orig = originalIndex[i]
         const isCanonical = i < canonicalCount
         const isHidden = hiddenSet.has(orig)
-        const color = isHidden ? '#bbbbbb' : isCanonical ? '#111111' : '#888888'
+        // canonical points dark blue, periodic copies light blue
+        const color = isHidden ? '#bbbbbb' : isCanonical ? '#00008b' : '#6f95d8'
         const r = isCanonical ? 0.035 : 0.022
         return (
           <mesh key={i} position={to3(p)}>
@@ -233,6 +234,23 @@ function VoronoiArcs({ results }: { results: ComputeResponse }) {
   )
 }
 
+// Voronoi points (circumcenters) across the 3x domain, light red —
+// mirroring the light blue of the Delaunay point copies.
+function VoronoiPoints({ results }: { results: ComputeResponse }) {
+  const g = results.voronoiGeometry
+  if (!g) return null
+  return (
+    <>
+      {g.points3x.map((p, i) => (
+        <mesh key={i} position={to3(p)}>
+          <sphereGeometry args={[0.018, 16, 16]} />
+          <meshBasicMaterial color="#e07f7f" />
+        </mesh>
+      ))}
+    </>
+  )
+}
+
 // Sublevel set of the Voronoi filtration at f_Vor (the Voronoi filtration
 // lives on the negated radius scale, so thresholds are typically negative):
 // the part of the Voronoi diagram not yet covered by the growing balls,
@@ -249,32 +267,44 @@ function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse;
   return <Line points={segments} segments color={RED} lineWidth={5} />
 }
 
-function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const { positions3x, originalIndex, weights, hidden } = results.points
-  const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+// Shared transparent-ball renderer.
+// Stencil trick: each screen pixel is shaded by at most one ball of the same
+// family (the first fragment marks the stencil with `stencilRef`, later
+// fragments fail the NotEqual test), so overlapping balls render as a flat
+// union instead of stacking alpha. Distinct families use distinct refs, so
+// e.g. Delaunay (blue) and Voronoi (red) balls still blend with each other.
+// In 3D the balls are lit (highlight + shading) so depth is readable.
+function Balls({
+  items,
+  is2d,
+  color,
+  stencilRef,
+  z2d,
+}: {
+  items: { p: number[]; r: number }[]
+  is2d: boolean
+  color: string
+  stencilRef: number
+  z2d: number
+}) {
   const opacity = useStore((s) => s.ui.ballOpacity)
-  const is2d = results.d === 2
 
-  // Stencil trick: each screen pixel is shaded by at most one ball (the first
-  // fragment marks the stencil, later ball fragments fail the NotEqual test),
-  // so overlapping balls render as a flat union instead of stacking alpha.
-  // In 3D the balls are lit (highlight + shading) so depth is readable.
   const material = useMemo(() => {
     const m = is2d
-      ? new THREE.MeshBasicMaterial({ color: '#999999', transparent: true, depthWrite: false })
+      ? new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false })
       : new THREE.MeshPhongMaterial({
-          color: '#8899aa',
+          color,
           specular: '#888888',
           shininess: 60,
           transparent: true,
           depthWrite: false,
         })
     m.stencilWrite = true
-    m.stencilRef = 1
+    m.stencilRef = stencilRef
     m.stencilFunc = THREE.NotEqualStencilFunc
     m.stencilZPass = THREE.ReplaceStencilOp
     return m
-  }, [is2d])
+  }, [is2d, color, stencilRef])
   material.opacity = opacity
   useEffect(() => () => material.dispose(), [material])
 
@@ -296,26 +326,48 @@ function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius
   )
   useEffect(() => () => unitGeometry.dispose(), [unitGeometry])
 
-  if (radius <= 0 && weights.every((w) => w === 0)) return null
   return (
     <group ref={groupRef}>
-      {positions3x.map((p, i) => {
-        const orig = originalIndex[i]
-        if (hiddenSet.has(orig)) return null
-        const r = radius + Math.sqrt(weights[orig])
-        if (r <= 0) return null
-        return (
-          <mesh
-            key={i}
-            position={is2d ? [p[0], p[1], -0.01] : to3(p)}
-            scale={r}
-            material={material}
-            geometry={unitGeometry}
-          />
-        )
-      })}
+      {items.map(({ p, r }, i) => (
+        <mesh
+          key={i}
+          position={is2d ? [p[0], p[1], z2d] : to3(p)}
+          scale={r}
+          material={material}
+          geometry={unitGeometry}
+        />
+      ))}
     </group>
   )
+}
+
+// Delaunay filtration balls: radius f_Del + sqrt(w), light blue.
+function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const { positions3x, originalIndex, weights, hidden } = results.points
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+  if (radius <= 0 && weights.every((w) => w === 0)) return null
+  const items: { p: number[]; r: number }[] = []
+  positions3x.forEach((p, i) => {
+    const orig = originalIndex[i]
+    if (hiddenSet.has(orig)) return
+    const r = radius + Math.sqrt(weights[orig])
+    if (r > 0) items.push({ p, r })
+  })
+  return <Balls items={items} is2d={results.d === 2} color="#8fb0e8" stencilRef={1} z2d={-0.01} />
+}
+
+// Voronoi filtration balls: centered at the Voronoi points, uniform radius
+// f_Vor - min(f_Vor), light red.
+function VoronoiFiltrationBalls({ results, radiusVor }: { results: ComputeResponse; radiusVor: number }) {
+  const g = results.voronoiGeometry
+  let vMin = Infinity
+  if (results.voronoi)
+    for (const bars of results.voronoi.barcodes) for (const b of bars) vMin = Math.min(vMin, b.birth)
+  if (!g || !Number.isFinite(vMin)) return null
+  const r = (Number.isFinite(radiusVor) ? Math.max(radiusVor, vMin) : vMin) - vMin
+  if (r <= 0) return null
+  const items = g.points3x.map((p) => ({ p, r }))
+  return <Balls items={items} is2d={results.d === 2} color="#e08f8f" stencilRef={2} z2d={-0.009} />
 }
 
 export default function Scene() {
@@ -369,22 +421,26 @@ export default function Scene() {
       {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
       {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
       {ui.showPoints && <Points results={results} />}
+      {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
       {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
+      {ui.showVoronoiBalls && <VoronoiFiltrationBalls results={results} radiusVor={ui.radiusVor} />}
     </Canvas>
   )
 }
 
 // Pop-up display options, embedded in the Visualization panel header.
 const DISPLAY_TOGGLES = [
-  { key: 'showPoints', label: 'points' },
+  { key: 'showPoints', label: 'Delaunay points' },
   { key: 'showBasis', label: 'lattice vectors' },
   { key: 'showDomains', label: 'Dirichlet domains' },
   { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
   { key: 'showArcs', label: 'periodic Delaunay edges' },
+  { key: 'showVoronoiPoints', label: 'Voronoi points' },
   { key: 'showVoronoiSkeleton', label: 'full Voronoi skeleton' },
   { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
   { key: 'showBalls', label: 'Delaunay filtration (balls)' },
   { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)' },
+  { key: 'showVoronoiBalls', label: 'Voronoi filtration (balls)' },
   { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)' },
 ] as const
 

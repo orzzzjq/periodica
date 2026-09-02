@@ -19,9 +19,11 @@ interface UiState {
   showArcs: boolean
   showFiltrationEdges: boolean
   showVoronoiFiltrationEdges: boolean
+  showVoronoiPoints: boolean
   showVoronoiSkeleton: boolean
   showVoronoiArcs: boolean
   showBalls: boolean
+  showVoronoiBalls: boolean
   ballOpacity: number
   sameRange: boolean
   imageSize: number
@@ -92,9 +94,11 @@ export const useStore = create<State>((set, get) => {
       showArcs: true,
       showFiltrationEdges: true,
       showVoronoiFiltrationEdges: true,
+      showVoronoiPoints: true,
       showVoronoiSkeleton: true,
       showVoronoiArcs: true,
       showBalls: true,
+      showVoronoiBalls: true,
       ballOpacity: 0.35,
       sameRange: true,
       imageSize: 100,
