@@ -128,49 +128,57 @@ function QuotientArcs({ results }: { results: ComputeResponse }) {
   )
 }
 
+// Replicate resolved arc segments by lattice shifts z in [-3,3]^d, keeping
+// copies with both endpoints inside the 3x Dirichlet domain. BFS from the
+// canonical copy (z=0): by convexity a direction is never extended past its
+// first out-of-domain copy.
+function tile3xSegments(
+  arcs: { start: number[]; end: number[] }[],
+  results: ComputeResponse,
+  zLift: number,
+): [number, number, number][] {
+  const { d, basis, domainA, domainB } = results
+  const pts: [number, number, number][] = []
+  for (const arc of arcs) {
+    const seen = new Set<string>()
+    const queue: number[][] = [new Array(d).fill(0)]
+    seen.add(queue[0].join(','))
+    while (queue.length) {
+      const z = queue.pop()!
+      const t = [0, 0, 0]
+      for (let k = 0; k < d; k++) for (let j = 0; j < d; j++) t[j] += z[k] * basis[k][j]
+      const a = [arc.start[0] + t[0], arc.start[1] + t[1], (arc.start[2] ?? 0) + t[2]]
+      const b = [arc.end[0] + t[0], arc.end[1] + t[1], (arc.end[2] ?? 0) + t[2]]
+      if (!inDirichletDomain(a, domainA, domainB) || !inDirichletDomain(b, domainA, domainB))
+        continue
+      pts.push([a[0], a[1], a[2] + zLift], [b[0], b[1], b[2] + zLift])
+      for (let k = 0; k < d; k++)
+        for (const step of [1, -1]) {
+          const nz = [...z]
+          nz[k] += step
+          if (Math.abs(nz[k]) > 3) continue
+          const key = nz.join(',')
+          if (!seen.has(key)) {
+            seen.add(key)
+            queue.push(nz)
+          }
+        }
+    }
+  }
+  return pts
+}
+
+// tolerance: the slider bounds come from the barcodes, which match edge
+// filtration values only up to floating-point rounding
+const filtEps = (radius: number) => 1e-9 * Math.max(1, Math.abs(radius))
+
 // Sublevel set of the Delaunay filtration: the periodic edges whose
 // filtration value is below the current ball radius R (slider-linked),
-// replicated by lattice translations across the 3x Dirichlet domain.
+// tiled across the 3x Dirichlet domain.
 function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
   const segments = useMemo(() => {
-    const { d, basis, domainA, domainB, quotientArcs } = results
-    // tolerance: the slider bounds come from the barcodes, which match edge
-    // filtration values only up to floating-point rounding
-    const eps = 1e-9 * Math.max(1, Math.abs(radius))
-    const zLift = d === 2 ? 0.002 : 0
-    const pts: [number, number, number][] = []
-    for (const arc of quotientArcs) {
-      if (arc.filtration > radius + eps) continue
-      // BFS over lattice shifts z in [-3,3]^d starting from the canonical
-      // copy: a copy is kept iff both endpoints lie in the 3x domain, and
-      // (convexity) a direction is never extended past its first
-      // out-of-domain copy.
-      const seen = new Set<string>()
-      const queue: number[][] = [new Array(d).fill(0)]
-      seen.add(queue[0].join(','))
-      while (queue.length) {
-        const z = queue.pop()!
-        const t = [0, 0, 0]
-        for (let k = 0; k < d; k++) for (let j = 0; j < d; j++) t[j] += z[k] * basis[k][j]
-        const a = [arc.start[0] + t[0], arc.start[1] + t[1], (arc.start[2] ?? 0) + t[2]]
-        const b = [arc.end[0] + t[0], arc.end[1] + t[1], (arc.end[2] ?? 0) + t[2]]
-        if (!inDirichletDomain(a, domainA, domainB) || !inDirichletDomain(b, domainA, domainB))
-          continue
-        pts.push([a[0], a[1], a[2] + zLift], [b[0], b[1], b[2] + zLift])
-        for (let k = 0; k < d; k++)
-          for (const step of [1, -1]) {
-            const nz = [...z]
-            nz[k] += step
-            if (Math.abs(nz[k]) > 3) continue
-            const key = nz.join(',')
-            if (!seen.has(key)) {
-              seen.add(key)
-              queue.push(nz)
-            }
-          }
-      }
-    }
-    return pts
+    const arcs = results.quotientArcs.filter((a) => a.filtration <= radius + filtEps(radius))
+    return tile3xSegments(arcs, results, results.d === 2 ? 0.002 : 0)
   }, [results, radius])
 
   if (segments.length === 0) return null
@@ -223,6 +231,21 @@ function VoronoiArcs({ results }: { results: ComputeResponse }) {
       ))}
     </>
   )
+}
+
+// The Voronoi filtration runs on the negated radius scale (cursor at
+// x = -R): edges with filtration <= -R are the part of the Voronoi
+// diagram not yet covered by the growing balls, tiled across the 3x domain.
+function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const segments = useMemo(() => {
+    const g = results.voronoiGeometry
+    if (!g) return []
+    const arcs = g.arcs.filter((a) => a.filtration <= -radius + filtEps(radius))
+    return tile3xSegments(arcs, results, results.d === 2 ? 0.005 : 0)
+  }, [results, radius])
+
+  if (segments.length === 0) return null
+  return <Line points={segments} segments color={RED} lineWidth={5} />
 }
 
 function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
@@ -341,6 +364,7 @@ export default function Scene() {
       {ui.showFullSkeleton && <FullSkeleton results={results} />}
       {ui.showArcs && <QuotientArcs results={results} />}
       {ui.showFiltrationEdges && <FiltrationEdges results={results} radius={ui.radius} />}
+      {ui.showVoronoiFiltrationEdges && <VoronoiFiltrationEdges results={results} radius={ui.radius} />}
       {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
       {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
       {ui.showPoints && <Points results={results} />}
@@ -360,6 +384,7 @@ const DISPLAY_TOGGLES = [
   { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
   { key: 'showBalls', label: 'Delaunay filtration (balls)' },
   { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)' },
+  { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)' },
 ] as const
 
 export function DisplayOptions() {

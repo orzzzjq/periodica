@@ -17,6 +17,7 @@ interface UiState {
   showFullSkeleton: boolean
   showArcs: boolean
   showFiltrationEdges: boolean
+  showVoronoiFiltrationEdges: boolean
   showVoronoiSkeleton: boolean
   showVoronoiArcs: boolean
   showBalls: boolean
@@ -86,6 +87,7 @@ export const useStore = create<State>((set, get) => {
       showFullSkeleton: true,
       showArcs: true,
       showFiltrationEdges: true,
+      showVoronoiFiltrationEdges: true,
       showVoronoiSkeleton: true,
       showVoronoiArcs: true,
       showBalls: true,
