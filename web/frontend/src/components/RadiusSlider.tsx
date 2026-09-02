@@ -1,3 +1,6 @@
+import { useMemo } from 'react'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import type { Bar } from '../api'
 import { useStore } from '../store'
 
@@ -37,9 +40,14 @@ export default function RadiusSlider() {
   }
   if (max <= min) max = min + 1
 
+  const label = useMemo(
+    () => katex.renderToString(`f_{Del} = ${radius.toFixed(3)}`),
+    [radius],
+  )
+
   return (
     <div className="slider-row">
-      <span>R = {radius.toFixed(3)}</span>
+      <span dangerouslySetInnerHTML={{ __html: label }} />
       <input
         type="range"
         min={min}

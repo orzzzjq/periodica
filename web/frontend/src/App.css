@@ -327,9 +327,12 @@ button:disabled {
   flex: 0 0 auto;
 }
 
-.slider-row span {
-  min-width: 80px;
+/* direct child only: the label contains KaTeX spans that must keep
+   their own layout */
+.slider-row > span {
+  min-width: 96px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .slider-row input[type='range'] {
