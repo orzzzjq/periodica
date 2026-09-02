@@ -113,7 +113,7 @@ function FullSkeleton({ results }: { results: ComputeResponse }) {
   }, [results])
   return (
     <lineSegments geometry={geometry}>
-      <lineBasicMaterial color="#444444" transparent opacity={0.3} />
+      <lineBasicMaterial color={BLUE} transparent opacity={0.35} />
     </lineSegments>
   )
 }
