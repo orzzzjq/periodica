@@ -458,30 +458,26 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
   }, [positions])
   useEffect(() => () => geometry.dispose(), [geometry])
 
-  // same flat-union stencil family as before (ref 2); lit in 3D
+  // 2D: flat-union stencil family (ref 2)
   const material = useMemo(() => {
-    const m = is2d
-      ? new THREE.MeshBasicMaterial({
-          color: '#e08f8f',
-          transparent: true,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-        })
-      : new THREE.MeshPhongMaterial({
-          color: '#e08f8f',
-          specular: '#888888',
-          shininess: 60,
-          transparent: true,
-          depthWrite: false,
-        })
+    const m = new THREE.MeshBasicMaterial({
+      color: '#e08f8f',
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
     m.stencilWrite = true
     m.stencilRef = 2
     m.stencilFunc = THREE.NotEqualStencilFunc
     m.stencilZPass = THREE.ReplaceStencilOp
     return m
-  }, [is2d])
+  }, [])
   material.opacity = opacity
   useEffect(() => () => material.dispose(), [material])
+
+  // 3D: depth pre-pass pair — only the outer surface of the cone+ball union
+  // is shaded (drawn after the Delaunay ball family, orders 1002/1003)
+  const { depthMat, colorMat } = useDepthPrepassMaterials('#e08f8f', opacity)
 
   // shared unit shapes, scaled per use
   const unitCircle = useMemo(() => new THREE.CircleGeometry(1, 48), [])
@@ -495,16 +491,6 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
   useEffect(() => () => unitCone.dispose(), [unitCone])
   const unitSphere = useMemo(() => new THREE.SphereGeometry(1, 32, 32), [])
   useEffect(() => () => unitSphere.dispose(), [unitSphere])
-
-  // stencil first-drawn-wins: draw nearest-first so the closest lit surface
-  // owns the overlap (same trick as the Delaunay balls)
-  const groupRef = useRef<THREE.Group>(null)
-  useFrame(({ camera }) => {
-    if (is2d || !groupRef.current) return
-    for (const m of groupRef.current.children) {
-      m.renderOrder = m.position.distanceTo(camera.position)
-    }
-  })
 
   if (is2d) {
     if (positions.length === 0) return null
@@ -529,8 +515,9 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     )
   }
 
-  return (
-    <group ref={groupRef}>
+  // one full pass of the family (cones + vertex balls) per material
+  const familyPass = (mat: THREE.Material, order: number, prefix: string) => (
+    <>
       {coneSides.map((s, i) => {
         const grow = F - s.fV
         if (grow <= 0) return null
@@ -538,12 +525,13 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
         const r = Math.sqrt(grow) / 2 // base radius = base width / 2
         return (
           <mesh
-            key={`c${i}`}
+            key={`${prefix}c${i}`}
             geometry={unitCone}
-            material={material}
+            material={mat}
             position={s.pos}
             quaternion={s.quat}
             scale={[r, h, r]}
+            renderOrder={order}
           />
         )
       })}
@@ -551,9 +539,23 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
         const grow = F - v.fV
         if (grow <= 0) return null
         return (
-          <mesh key={`s${i}`} geometry={unitSphere} material={material} position={v.p} scale={Math.sqrt(grow) / 2} />
+          <mesh
+            key={`${prefix}s${i}`}
+            geometry={unitSphere}
+            material={mat}
+            position={v.p}
+            scale={Math.sqrt(grow) / 2}
+            renderOrder={order}
+          />
         )
       })}
+    </>
+  )
+
+  return (
+    <group>
+      {familyPass(depthMat, 1002, 'd')}
+      {familyPass(colorMat, 1003, 'k')}
     </group>
   )
 }
@@ -572,56 +574,73 @@ function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse;
   return <PrefixSegments data={data} threshold={radius} color={RED} opacity={opacity} />
 }
 
+// Depth pre-pass materials for a translucent 3D family. The depth material
+// renders first (color writes off) and resolves the union's nearest surface
+// per pixel in the depth buffer; the color material then shades exactly
+// those fragments (EqualDepth), so only the outer surface of the union is
+// visible and each pixel is shaded once. Both passes use the same material
+// class so they rasterize bit-identical depths.
+function useDepthPrepassMaterials(color: string, opacity: number) {
+  const depthMat = useMemo(() => {
+    const m = new THREE.MeshPhongMaterial({ transparent: true, depthWrite: true })
+    m.colorWrite = false
+    return m
+  }, [])
+  useEffect(() => () => depthMat.dispose(), [depthMat])
+
+  const colorMat = useMemo(() => {
+    const m = new THREE.MeshPhongMaterial({
+      color,
+      specular: '#888888',
+      shininess: 60,
+      transparent: true,
+      depthWrite: false,
+    })
+    m.depthFunc = THREE.EqualDepth
+    return m
+  }, [color])
+  colorMat.opacity = opacity
+  useEffect(() => () => colorMat.dispose(), [colorMat])
+
+  return { depthMat, colorMat }
+}
+
 // Shared transparent-ball renderer.
-// Stencil trick: each screen pixel is shaded by at most one ball of the same
-// family (the first fragment marks the stencil with `stencilRef`, later
-// fragments fail the NotEqual test), so overlapping balls render as a flat
-// union instead of stacking alpha. Distinct families use distinct refs, so
-// e.g. Delaunay (blue) and Voronoi (red) balls still blend with each other.
-// In 3D the balls are lit (highlight + shading) so depth is readable.
+// 2D: stencil trick — each screen pixel is shaded by at most one ball of the
+// family (the first fragment marks the stencil, later fragments fail the
+// NotEqual test), a flat union. Distinct families use distinct refs and
+// still blend with each other.
+// 3D: depth pre-pass (see above) — only the outer surface of the union is
+// lit and shaded, with families drawn in a fixed order (`order`).
 function Balls({
   items,
   is2d,
   color,
   stencilRef,
   z2d,
+  order = 1000,
 }: {
   items: { p: number[]; r: number }[]
   is2d: boolean
   color: string
   stencilRef: number
   z2d: number
+  order?: number
 }) {
   const opacity = useStore((s) => s.ui.ballOpacity)
 
-  const material = useMemo(() => {
-    const m = is2d
-      ? new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false })
-      : new THREE.MeshPhongMaterial({
-          color,
-          specular: '#888888',
-          shininess: 60,
-          transparent: true,
-          depthWrite: false,
-        })
+  const flatMat = useMemo(() => {
+    const m = new THREE.MeshBasicMaterial({ color, transparent: true, depthWrite: false })
     m.stencilWrite = true
     m.stencilRef = stencilRef
     m.stencilFunc = THREE.NotEqualStencilFunc
     m.stencilZPass = THREE.ReplaceStencilOp
     return m
-  }, [is2d, color, stencilRef])
-  material.opacity = opacity
-  useEffect(() => () => material.dispose(), [material])
+  }, [color, stencilRef])
+  flatMat.opacity = opacity
+  useEffect(() => () => flatMat.dispose(), [flatMat])
 
-  // The stencil makes the FIRST drawn fragment win, so draw balls nearest-
-  // first: with shaded 3D spheres the closest surface must own the overlap.
-  const groupRef = useRef<THREE.Group>(null)
-  useFrame(({ camera }) => {
-    if (is2d || !groupRef.current) return
-    for (const m of groupRef.current.children) {
-      m.renderOrder = m.position.distanceTo(camera.position)
-    }
-  })
+  const { depthMat, colorMat } = useDepthPrepassMaterials(color, opacity)
 
   // One shared unit geometry, scaled per ball: rebuilding a SphereGeometry
   // for every ball on every slider tick is what made dragging stutter.
@@ -631,15 +650,28 @@ function Balls({
   )
   useEffect(() => () => unitGeometry.dispose(), [unitGeometry])
 
+  if (is2d) {
+    return (
+      <group>
+        {items.map(({ p, r }, i) => (
+          <mesh key={i} position={[p[0], p[1], z2d]} scale={r} material={flatMat} geometry={unitGeometry} />
+        ))}
+      </group>
+    )
+  }
   return (
-    <group ref={groupRef}>
+    <group>
+      {items.map(({ p, r }, i) => (
+        <mesh key={`d${i}`} position={to3(p)} scale={r} material={depthMat} geometry={unitGeometry} renderOrder={order} />
+      ))}
       {items.map(({ p, r }, i) => (
         <mesh
-          key={i}
-          position={is2d ? [p[0], p[1], z2d] : to3(p)}
+          key={`c${i}`}
+          position={to3(p)}
           scale={r}
-          material={material}
+          material={colorMat}
           geometry={unitGeometry}
+          renderOrder={order + 1}
         />
       ))}
     </group>

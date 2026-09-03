@@ -472,9 +472,14 @@ function fmtCoeff(c: number): string {
   return String(parseFloat(c.toPrecision(3)))
 }
 
+// volume of the k-dimensional unit ball: the shadow monomial of a component
+// with multiplicity m and wrap dimension k is m·vol_k·R^k
+const BALL_VOL = [1, 2, Math.PI, (4 * Math.PI) / 3]
+
 function monomialText(coeff: number, exp: number): string {
-  if (exp === 0) return fmtCoeff(coeff)
-  const co = fmtCoeff(coeff)
+  const total = coeff * BALL_VOL[exp]
+  if (exp === 0) return fmtCoeff(total)
+  const co = fmtCoeff(total)
   return `${co === '1' ? '' : co}R${exp === 1 ? '' : SUPERSCRIPTS[exp]}`
 }
 
@@ -520,11 +525,30 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
   for (let i = 0; i < n; i++) {
     const beam = tree[i]
     if (beam.length === 0) continue
-    const events: { t: number; label: string }[] = []
+    const raw: { t: number; coeff: number; exp: number }[] = []
     for (const [t, coeff, exp, child] of beam) {
       if (child === i || t === null) continue // own death: monomial unchanged
-      events.push({ t, label: monomialText(coeff, exp) })
+      raw.push({ t, coeff, exp })
     }
+    // Several monomial changes can happen at the same time (up to fp noise);
+    // keep only the final state: the smallest exponent, then coefficient.
+    const events: { t: number; label: string }[] = []
+    const eps = (t: number) => 1e-7 * Math.max(1, Math.abs(t))
+    let cluster: typeof raw = []
+    const flush = () => {
+      if (cluster.length === 0) return
+      let best = cluster[0]
+      for (const e of cluster) {
+        if (e.exp < best.exp || (e.exp === best.exp && e.coeff < best.coeff)) best = e
+      }
+      events.push({ t: cluster[cluster.length - 1].t, label: monomialText(best.coeff, best.exp) })
+      cluster = []
+    }
+    for (const e of raw) {
+      if (cluster.length > 0 && e.t - cluster[cluster.length - 1].t > eps(e.t)) flush()
+      cluster.push(e)
+    }
+    flush()
     branches.push({
       birth: beam[0][0] ?? 0,
       death: death[i],
@@ -589,7 +613,7 @@ function MergeTreePlot({
       mode: 'markers',
       marker: { symbol: 'line-ns-open', size: 7, color: 'black', line: { width: 1.5 } },
       hoverinfo: 'text',
-      hovertext: ex.map((t, i) => `${etext[i]} @ ${t.toFixed(3)}`),
+      hovertext: ex.map((t, i) => `${etext[i]} (${t.toFixed(3)})`),
     },
   ]
   if (showLabels) {
@@ -601,7 +625,7 @@ function MergeTreePlot({
       mode: 'text',
       text: etext,
       textposition: 'top left',
-      textfont: { size: 10 },
+      textfont: { size: 12 },
       cliponaxis: false,
       hoverinfo: 'skip',
     })
