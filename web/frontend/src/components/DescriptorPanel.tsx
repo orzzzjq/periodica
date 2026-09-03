@@ -95,18 +95,20 @@ function baseLayout(i: number, xmin: number, xmax: number, width: number): Parti
 function usePanelWidth(minW = 300) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(minW)
+  const [height, setHeight] = useState(200)
   useEffect(() => {
     const holder = ref.current?.parentElement // the panel-content-holder
     if (!holder) return
     const recompute = () => {
       if (holder.clientWidth > 0) setWidth(Math.max(minW, holder.clientWidth - 18))
+      if (holder.clientHeight > 0) setHeight(Math.max(140, holder.clientHeight - 14))
     }
     recompute()
     const obs = new ResizeObserver(recompute)
     obs.observe(holder)
     return () => obs.disconnect()
   }, [minW])
-  return { ref, width }
+  return { ref, width, height }
 }
 
 // A genuinely square plot region with identical x/y ranges — equal aspect
@@ -538,12 +540,14 @@ function MergeTreePlot({
   tree,
   barcodes,
   width,
+  height,
   cursor,
   cursorColor,
 }: {
   tree: TreeEvent[][]
   barcodes: Bar[][]
   width: number
+  height: number
   cursor: number | null
   cursorColor: string
 }) {
@@ -612,10 +616,12 @@ function MergeTreePlot({
         ]
       : []
 
-  const height = Math.max(PANEL_HEIGHT, 42 + (maxRow + 1) * 26 + 16)
+  // fill the panel height (so top/bottom whitespace stays symmetric), but
+  // never squeeze rows below readability
+  const plotHeight = Math.max(height, 42 + (maxRow + 1) * 20 + 16)
   const layout: Partial<Layout> = {
     width,
-    height,
+    height: plotHeight,
     margin: { l: 46, r: 46, t: 8, b: 34 },
     xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
     yaxis: { visible: false, range: [-0.9, maxRow + 1.1] },
@@ -627,7 +633,7 @@ function MergeTreePlot({
 
 export function MergeTreePanel() {
   const { desc, error } = useDescriptors()
-  const { ref, width } = usePanelWidth()
+  const { ref, width, height } = usePanelWidth()
   const { cursor, cursorColor } = useFiltrationCursor(desc)
   return (
     <div className="plots" ref={ref}>
@@ -637,6 +643,7 @@ export function MergeTreePanel() {
           tree={desc.tree}
           barcodes={desc.barcodes}
           width={width}
+          height={height}
           cursor={cursor}
           cursorColor={cursorColor}
         />
