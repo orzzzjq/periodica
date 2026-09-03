@@ -383,19 +383,17 @@ function DescError({ error }: { error: string | null }) {
 }
 
 // Filtration cursor for the active complex: f_Del (blue) or f_Vor (red),
-// hidden (null) while its slider sits at the barcode's minimum birth.
+// hidden (null) while its slider sits at either end of its range (the
+// barcode's minimum birth, or the slider maximum = the barcode plot xmax).
 function useFiltrationCursor(desc: Descriptors | null): { cursor: number | null; cursorColor: string } {
   const radius = useStore((s) => s.ui.radius)
   const radiusVor = useStore((s) => s.ui.radiusVor)
   const which = useStore((s) => s.ui.complexType)
   const minB = desc ? xRange(desc.barcodes, 0, 0)[0] : -Infinity
-  let cursor: number | null
-  if (which === 'voronoi') {
-    cursor = Number.isFinite(radiusVor) && radiusVor > minB + 1e-9 ? radiusVor : null
-  } else {
-    cursor = radius > minB + 1e-9 ? radius : null
-  }
-  return { cursor, cursorColor: which === 'voronoi' ? 'red' : 'blue' }
+  const maxB = desc ? xRange(desc.barcodes, 0.12, 0.05)[1] : Infinity // = slider max
+  const visible = (v: number) => Number.isFinite(v) && v > minB + 1e-9 && v < maxB - 1e-9
+  const value = which === 'voronoi' ? radiusVor : radius
+  return { cursor: visible(value) ? value : null, cursorColor: which === 'voronoi' ? 'red' : 'blue' }
 }
 
 // The diagram/image cursor: for threshold f, the vertical segment x=f with
