@@ -24,7 +24,10 @@ interface UiState {
   showVoronoiArcs: boolean
   showBalls: boolean
   showVoronoiBalls: boolean
-  ballOpacity: number
+  ballOpacity: number // Delaunay filtration balls
+  filtEdgeOpacity: number // Delaunay filtration edges
+  coneOpacity: number // Voronoi filtration cones
+  vorEdgeOpacity: number // Voronoi filtration edges
   sameRange: boolean
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
@@ -100,6 +103,9 @@ export const useStore = create<State>((set, get) => {
       showBalls: true,
       showVoronoiBalls: true,
       ballOpacity: 0.35,
+      filtEdgeOpacity: 1,
+      coneOpacity: 0.35,
+      vorEdgeOpacity: 1,
       sameRange: true,
       imageSize: 100,
       complexType: 'delaunay',

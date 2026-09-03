@@ -201,7 +201,17 @@ function buildTiledSegments(
 // Draws the first `count` segments of a prefix-sorted TiledSegments buffer.
 // The full geometry lives on the GPU once (LineSegments2 is instanced);
 // each slider tick only updates instanceCount — zero re-upload.
-function PrefixSegments({ data, threshold, color }: { data: TiledSegments; threshold: number; color: string }) {
+function PrefixSegments({
+  data,
+  threshold,
+  color,
+  opacity,
+}: {
+  data: TiledSegments
+  threshold: number
+  color: string
+  opacity: number
+}) {
   const ref = useRef<Line2>(null)
 
   // binary search: number of segments with filtration <= threshold
@@ -221,7 +231,18 @@ function PrefixSegments({ data, threshold, color }: { data: TiledSegments; thres
   })
 
   if (data.points.length === 0) return null
-  return <Line ref={ref} points={data.points} segments color={color} lineWidth={5} visible={count > 0} />
+  return (
+    <Line
+      ref={ref}
+      points={data.points}
+      segments
+      color={color}
+      lineWidth={5}
+      transparent
+      opacity={opacity}
+      visible={count > 0}
+    />
+  )
 }
 
 // Sublevel set of the Delaunay filtration: the periodic edges whose
@@ -232,7 +253,8 @@ function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius
     () => buildTiledSegments(results.quotientArcs, results, results.d === 2 ? 0.002 : 0),
     [results],
   )
-  return <PrefixSegments data={data} threshold={radius} color={BLUE} />
+  const opacity = useStore((s) => s.ui.filtEdgeOpacity)
+  return <PrefixSegments data={data} threshold={radius} color={BLUE} opacity={opacity} />
 }
 
 const RED = '#dd2222'
@@ -331,7 +353,7 @@ const coneHeight = (grow: number, L: number, fE: number, fV: number) =>
   Math.max(0, Math.min(L, (grow * L) / (2 * (fE - fV))))
 
 function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeResponse; radiusVor: number }) {
-  const opacity = useStore((s) => s.ui.ballOpacity)
+  const opacity = useStore((s) => s.ui.coneOpacity)
   const is2d = results.d === 2
 
   // static per-copy data: tiled once per compute result
@@ -546,7 +568,8 @@ function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse;
     if (!g) return { points: [], filtration: [] } as TiledSegments
     return buildTiledSegments(g.arcs, results, results.d === 2 ? 0.005 : 0)
   }, [results])
-  return <PrefixSegments data={data} threshold={radius} color={RED} />
+  const opacity = useStore((s) => s.ui.vorEdgeOpacity)
+  return <PrefixSegments data={data} threshold={radius} color={RED} opacity={opacity} />
 }
 
 // Shared transparent-ball renderer.
@@ -699,19 +722,24 @@ export default function Scene() {
 }
 
 // Pop-up display options, embedded in the Visualization panel header.
+// Column 1: static structures; column 2: slider-linked filtration overlays,
+// each with its own transparency control.
 const DISPLAY_TOGGLES = [
-  { key: 'showPoints', label: 'Delaunay points' },
   { key: 'showBasis', label: 'lattice vectors' },
   { key: 'showDomains', label: 'Dirichlet domains' },
-  { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
-  { key: 'showArcs', label: 'periodic Delaunay edges' },
+  { key: 'showPoints', label: 'Delaunay points' },
   { key: 'showVoronoiPoints', label: 'Voronoi points' },
+  { key: 'showFullSkeleton', label: 'full Delaunay skeleton' },
   { key: 'showVoronoiSkeleton', label: 'full Voronoi skeleton' },
+  { key: 'showArcs', label: 'periodic Delaunay edges' },
   { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
-  { key: 'showBalls', label: 'Delaunay filtration (balls)' },
-  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)' },
-  { key: 'showVoronoiBalls', label: 'Voronoi filtration (balls)' },
-  { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)' },
+] as const
+
+const FILTRATION_TOGGLES = [
+  { key: 'showBalls', label: 'Delaunay filtration (balls)', opacityKey: 'ballOpacity' },
+  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)', opacityKey: 'filtEdgeOpacity' },
+  { key: 'showVoronoiBalls', label: 'Voronoi filtration (cones)', opacityKey: 'coneOpacity' },
+  { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
 ] as const
 
 export function DisplayOptions() {
@@ -724,28 +752,38 @@ export function DisplayOptions() {
         display {open ? '▴' : '▾'}
       </button>
       {open && (
-        <div className="popup-panel">
-          {DISPLAY_TOGGLES.map(({ key, label }) => (
-            <div key={key}>
-              <label className="row">
+        <div className="popup-panel popup-columns">
+          <div className="popup-col">
+            {DISPLAY_TOGGLES.map(({ key, label }) => (
+              <label key={key} className="row">
                 <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />
                 {label}
               </label>
-              {key === 'showBalls' && ui.showBalls && (
-                <div className="row popup-sub">
-                  <span>transparency</span>
-                  <input
-                    type="range"
-                    min={0.05}
-                    max={1}
-                    step={0.01}
-                    value={ui.ballOpacity}
-                    onChange={(e) => setUi({ ballOpacity: e.target.valueAsNumber })}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
+          <div className="popup-col">
+            {FILTRATION_TOGGLES.map(({ key, label, opacityKey }) => (
+              <div key={key}>
+                <label className="row">
+                  <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />
+                  {label}
+                </label>
+                {ui[key] && (
+                  <div className="row popup-sub">
+                    <span>transparency</span>
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={1}
+                      step={0.01}
+                      value={ui[opacityKey]}
+                      onChange={(e) => setUi({ [opacityKey]: e.target.valueAsNumber })}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

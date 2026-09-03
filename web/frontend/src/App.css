@@ -95,7 +95,9 @@
   border: 1px solid #c4c4c4;
   border-radius: 6px;
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
+  /* visible so header pop-ups (display options) can extend past the window;
+     the header/body clip themselves to keep the rounded corners */
+  overflow: visible;
 }
 
 .panel-window.drop-target {
@@ -110,6 +112,7 @@
   flex: 0 0 32px;
   background: #f0f0f0;
   border-bottom: 1px solid #d8d8d8;
+  border-radius: 6px 6px 0 0;
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -164,6 +167,7 @@
   min-height: 0;
   position: relative;
   overflow: hidden;
+  border-radius: 0 0 6px 6px;
 }
 
 .panel-content-holder {
@@ -375,6 +379,19 @@ button:disabled {
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.15);
   padding: 8px 14px;
   min-width: 180px;
+}
+
+.popup-columns {
+  display: flex;
+  gap: 22px;
+  align-items: flex-start;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.popup-col {
+  display: flex;
+  flex-direction: column;
 }
 
 .popup-sub {
