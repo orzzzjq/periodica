@@ -29,6 +29,7 @@ interface UiState {
   coneOpacity: number // Voronoi filtration cones
   vorEdgeOpacity: number // Voronoi filtration edges
   sameRange: boolean
+  showTreeMultiplicity: boolean // monomial labels on the merge tree
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
 }
@@ -107,6 +108,7 @@ export const useStore = create<State>((set, get) => {
       coneOpacity: 0.35,
       vorEdgeOpacity: 1,
       sameRange: true,
+      showTreeMultiplicity: true,
       imageSize: 100,
       complexType: 'delaunay',
     },

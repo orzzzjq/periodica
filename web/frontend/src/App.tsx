@@ -1,5 +1,12 @@
 import ControlPanel from './components/ControlPanel'
-import { BarcodePanel, DiagramPanel, ImagePanel, MergeTreePanel, SharedRangeToggle } from './components/DescriptorPanel'
+import {
+  BarcodePanel,
+  DiagramPanel,
+  ImagePanel,
+  MergeTreePanel,
+  SharedRangeToggle,
+  TreeDisplayOptions,
+} from './components/DescriptorPanel'
 import PanelHost from './components/PanelSystem'
 import RadiusSlider from './components/RadiusSlider'
 import Scene, { DisplayOptions } from './components/Scene'
@@ -44,6 +51,7 @@ const CONTENTS = {
 const HEADER_EXTRAS = {
   scene: <DisplayOptions />,
   image: <SharedRangeToggle />,
+  tree: <TreeDisplayOptions />,
 }
 
 export default function App() {

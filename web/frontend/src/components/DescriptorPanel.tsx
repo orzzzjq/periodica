@@ -543,6 +543,7 @@ function MergeTreePlot({
   height,
   cursor,
   cursorColor,
+  showLabels,
 }: {
   tree: TreeEvent[][]
   barcodes: Bar[][]
@@ -550,6 +551,7 @@ function MergeTreePlot({
   height: number
   cursor: number | null
   cursorColor: string
+  showLabels: boolean
 }) {
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
   const branches = useMemo(() => layoutTree(tree), [tree])
@@ -589,17 +591,21 @@ function MergeTreePlot({
       hoverinfo: 'text',
       hovertext: ex.map((t, i) => `${etext[i]} @ ${t.toFixed(3)}`),
     },
-    {
+  ]
+  if (showLabels) {
+    // top left: the label ends just left of the event, so merge connectors
+    // (vertical lines at the event x) never cover it
+    traces.push({
       x: ex,
       y: ey,
       mode: 'text',
       text: etext,
-      textposition: 'top center',
+      textposition: 'top left',
       textfont: { size: 10 },
       cliponaxis: false,
       hoverinfo: 'skip',
-    },
-  ]
+    })
+  }
 
   const cursorLine: NonNullable<Partial<Layout>['shapes']> =
     cursor !== null
@@ -635,6 +641,7 @@ export function MergeTreePanel() {
   const { desc, error } = useDescriptors()
   const { ref, width, height } = usePanelWidth()
   const { cursor, cursorColor } = useFiltrationCursor(desc)
+  const showLabels = useStore((s) => s.ui.showTreeMultiplicity)
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
@@ -646,7 +653,34 @@ export function MergeTreePanel() {
           height={height}
           cursor={cursor}
           cursorColor={cursorColor}
+          showLabels={showLabels}
         />
+      )}
+    </div>
+  )
+}
+
+// display popup for the merge tree panel header
+export function TreeDisplayOptions() {
+  const show = useStore((s) => s.ui.showTreeMultiplicity)
+  const setUi = useStore((s) => s.setUi)
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="popup-control">
+      <button className={open ? 'active' : ''} onClick={() => setOpen(!open)}>
+        display {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <div className="popup-panel">
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={show}
+              onChange={(e) => setUi({ showTreeMultiplicity: e.target.checked })}
+            />
+            Multiplicity
+          </label>
+        </div>
       )}
     </div>
   )
