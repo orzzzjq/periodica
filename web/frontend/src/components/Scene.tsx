@@ -2,6 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Line, MapControls, OrbitControls, OrthographicCamera } from '@react-three/drei'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
+import type { Line2 } from 'three-stdlib'
 import { inDirichletDomain, type ComputeResponse, type Polytope2D, type Polytope3D } from '../api'
 import { useStore } from '../store'
 
@@ -173,19 +174,65 @@ function tile3xSegments(
 // filtration values only up to floating-point rounding
 const filtEps = (radius: number) => 1e-9 * Math.max(1, Math.abs(radius))
 
+// All tiled copies of all arcs, ordered by arc filtration value: the
+// sublevel set at any threshold f is a prefix of the segment list. Built
+// once per compute result — the slider never re-tiles.
+interface TiledSegments {
+  points: [number, number, number][] // two entries per segment
+  filtration: number[] // per segment, ascending
+}
+
+function buildTiledSegments(
+  arcs: { start: number[]; end: number[]; filtration: number }[],
+  results: ComputeResponse,
+  zLift: number,
+): TiledSegments {
+  const sorted = [...arcs].sort((a, b) => a.filtration - b.filtration)
+  const points: [number, number, number][] = []
+  const filtration: number[] = []
+  for (const arc of sorted) {
+    const segs = tile3xSegments([arc], results, zLift)
+    for (const p of segs) points.push(p)
+    for (let i = 0; i < segs.length / 2; i++) filtration.push(arc.filtration)
+  }
+  return { points, filtration }
+}
+
+// Draws the first `count` segments of a prefix-sorted TiledSegments buffer.
+// The full geometry lives on the GPU once (LineSegments2 is instanced);
+// each slider tick only updates instanceCount — zero re-upload.
+function PrefixSegments({ data, threshold, color }: { data: TiledSegments; threshold: number; color: string }) {
+  const ref = useRef<Line2>(null)
+
+  // binary search: number of segments with filtration <= threshold
+  const t = threshold + filtEps(threshold)
+  let lo = 0
+  let hi = data.filtration.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (data.filtration[mid] <= t) lo = mid + 1
+    else hi = mid
+  }
+  const count = lo
+
+  // set every frame: robust against drei rebuilding the geometry internally
+  useFrame(() => {
+    if (ref.current) ref.current.geometry.instanceCount = count
+  })
+
+  if (data.points.length === 0) return null
+  return <Line ref={ref} points={data.points} segments color={color} lineWidth={5} visible={count > 0} />
+}
+
 // Sublevel set of the Delaunay filtration: the periodic edges whose
 // power-scale filtration value is below the current threshold f_Del
 // (slider-linked), tiled across the 3x Dirichlet domain.
 function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const segments = useMemo(() => {
-    const arcs = results.quotientArcs.filter((a) => a.filtration <= radius + filtEps(radius))
-    return tile3xSegments(arcs, results, results.d === 2 ? 0.002 : 0)
-  }, [results, radius])
-
-  if (segments.length === 0) return null
-  // one LineSegments2 for all copies: per-copy <Line> components would
-  // rebuild hundreds of geometries on every slider tick
-  return <Line points={segments} segments color={BLUE} lineWidth={5} />
+  const data = useMemo(
+    () => buildTiledSegments(results.quotientArcs, results, results.d === 2 ? 0.002 : 0),
+    [results],
+  )
+  return <PrefixSegments data={data} threshold={radius} color={BLUE} />
 }
 
 const RED = '#dd2222'
@@ -251,20 +298,121 @@ function VoronoiPoints({ results }: { results: ComputeResponse }) {
   )
 }
 
+// 2D cone approximation of the Voronoi filtration: every tiled Voronoi edge
+// grows an isosceles triangle from each endpoint toward the other. A side
+// starts once F = f_Vor passes the endpoint's vertex filtration f_V; its
+// height along the edge is (L/2)·(F−f_V)/max(F−f_V, f_E−f_V) — reaching the
+// midpoint exactly when the edge is born (F = f_E) and stopping there — and
+// its base width is F−f_V, centered at the Voronoi point.
+interface ConeEdge {
+  p1: [number, number]
+  p2: [number, number]
+  u: [number, number] // unit vector p1 -> p2
+  n: [number, number] // unit normal
+  L: number
+  fE: number
+  fV1: number
+  fV2: number
+}
+
+const CONE_Z = -0.009 // same layer the red balls used in 2D
+
+function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeResponse; radiusVor: number }) {
+  const opacity = useStore((s) => s.ui.ballOpacity)
+
+  // static per-copy data: tiled once per compute result
+  const edges = useMemo<ConeEdge[]>(() => {
+    const g = results.voronoiGeometry
+    if (!g) return []
+    const out: ConeEdge[] = []
+    for (const arc of g.arcs) {
+      const segs = tile3xSegments([arc], results, 0) // pairs (start, end) per copy
+      for (let k = 0; k < segs.length; k += 2) {
+        const a = segs[k]
+        const b = segs[k + 1]
+        const dx = b[0] - a[0]
+        const dy = b[1] - a[1]
+        const L = Math.hypot(dx, dy)
+        if (L < 1e-12) continue
+        const u: [number, number] = [dx / L, dy / L]
+        out.push({
+          p1: [a[0], a[1]],
+          p2: [b[0], b[1]],
+          u,
+          n: [-u[1], u[0]],
+          L,
+          fE: arc.filtration,
+          fV1: arc.fStart,
+          fV2: arc.fEnd,
+        })
+      }
+    }
+    return out
+  }, [results])
+
+  const F = Number.isFinite(radiusVor) ? radiusVor : -Infinity
+
+  const positions = useMemo(() => {
+    const arr: number[] = []
+    for (const e of edges) {
+      const sides = [
+        { c: e.p1, fV: e.fV1, dir: 1 },
+        { c: e.p2, fV: e.fV2, dir: -1 },
+      ]
+      for (const { c, fV, dir } of sides) {
+        const grow = F - fV
+        if (grow <= 0) continue
+        const h = (e.L / 2) * (grow / Math.max(grow, e.fE - fV))
+        const w2 = grow / 2
+        arr.push(
+          c[0] + e.n[0] * w2, c[1] + e.n[1] * w2, CONE_Z,
+          c[0] - e.n[0] * w2, c[1] - e.n[1] * w2, CONE_Z,
+          c[0] + dir * e.u[0] * h, c[1] + dir * e.u[1] * h, CONE_Z,
+        )
+      }
+    }
+    return new Float32Array(arr)
+  }, [edges, F])
+
+  const geometry = useMemo(() => {
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+    return g
+  }, [positions])
+  useEffect(() => () => geometry.dispose(), [geometry])
+
+  // same flat-union stencil family as the red Voronoi balls (ref 2)
+  const material = useMemo(() => {
+    const m = new THREE.MeshBasicMaterial({
+      color: '#e08f8f',
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+    m.stencilWrite = true
+    m.stencilRef = 2
+    m.stencilFunc = THREE.NotEqualStencilFunc
+    m.stencilZPass = THREE.ReplaceStencilOp
+    return m
+  }, [])
+  material.opacity = opacity
+  useEffect(() => () => material.dispose(), [material])
+
+  if (positions.length === 0) return null
+  return <mesh geometry={geometry} material={material} />
+}
+
 // Sublevel set of the Voronoi filtration at f_Vor (the Voronoi filtration
 // lives on the negated power-distance scale, so thresholds are typically
 // negative): the part of the Voronoi diagram not yet covered by the growing
 // balls, tiled across the 3x domain.
 function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const segments = useMemo(() => {
+  const data = useMemo(() => {
     const g = results.voronoiGeometry
-    if (!g) return []
-    const arcs = g.arcs.filter((a) => a.filtration <= radius + filtEps(radius))
-    return tile3xSegments(arcs, results, results.d === 2 ? 0.005 : 0)
-  }, [results, radius])
-
-  if (segments.length === 0) return null
-  return <Line points={segments} segments color={RED} lineWidth={5} />
+    if (!g) return { points: [], filtration: [] } as TiledSegments
+    return buildTiledSegments(g.arcs, results, results.d === 2 ? 0.005 : 0)
+  }, [results])
+  return <PrefixSegments data={data} threshold={radius} color={RED} />
 }
 
 // Shared transparent-ball renderer.
@@ -425,7 +573,12 @@ export default function Scene() {
       {ui.showPoints && <Points results={results} />}
       {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
       {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
-      {ui.showVoronoiBalls && <VoronoiFiltrationBalls results={results} radiusVor={ui.radiusVor} />}
+      {ui.showVoronoiBalls &&
+        (is2d ? (
+          <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />
+        ) : (
+          <VoronoiFiltrationBalls results={results} radiusVor={ui.radiusVor} />
+        ))}
     </Canvas>
   )
 }

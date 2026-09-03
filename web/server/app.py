@@ -192,6 +192,10 @@ def compute(req: ComputeRequest):
                 'start': start.tolist(),
                 'end': end.tolist(),
                 'filtration': float(pv_ef[i]),
+                # endpoint (Voronoi vertex) filtration values, for the
+                # cone approximation of the Voronoi filtration
+                'fStart': float(pv_pf[s]),
+                'fEnd': float(pv_pf[t]),
             })
         voronoi_geometry = {
             'points3x': vor_pts.T.tolist(),
