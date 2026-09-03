@@ -157,7 +157,17 @@ function useSquareSize(nPlots: number, rightMargin: number, extraTop = 0) {
   return { ref, size }
 }
 
-function BarcodePlots({ barcodes, width, radius }: { barcodes: Bar[][]; width: number; radius: number | null }) {
+function BarcodePlots({
+  barcodes,
+  width,
+  radius,
+  cursorColor,
+}: {
+  barcodes: Bar[][]
+  width: number
+  radius: number | null
+  cursorColor: string
+}) {
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
   // live filtration cursor linked to the visualization slider (null = hidden)
   const radiusLine: Partial<Layout>['shapes'] =
@@ -170,7 +180,7 @@ function BarcodePlots({ barcodes, width, radius }: { barcodes: Bar[][]; width: n
             y0: 0,
             y1: 1,
             yref: 'paper',
-            line: { color: 'red', width: 1, dash: 'dash' },
+            line: { color: cursorColor, width: 1, dash: 'dash' },
           },
         ]
       : []
@@ -354,18 +364,22 @@ export function BarcodePanel() {
   const radiusVor = useStore((s) => s.ui.radiusVor)
   const which = useStore((s) => s.ui.complexType)
   const { ref, width } = usePanelWidth()
-  // Each barcode follows its own filtration slider: f_Del for Delaunay,
-  // f_Vor (already on the negated scale) for Voronoi. No cursor while a
-  // slider rests at its start position (f_Del at 0, f_Vor at its minimum).
-  let cursor: number | null = Math.abs(radius) > 1e-9 ? radius : null
+  // Each barcode follows its own filtration slider (f_Del / f_Vor), drawn
+  // in its complex's color (blue Delaunay, red Voronoi). No cursor while a
+  // slider sits at its minimum (the barcode's earliest birth — which is
+  // negative in the weighted case, not 0).
+  const minB = desc ? xRange(desc.barcodes, 0, 0)[0] : -Infinity
+  let cursor: number | null
   if (which === 'voronoi') {
-    const vMin = desc ? xRange(desc.barcodes, 0, 0)[0] : -Infinity
-    cursor = Number.isFinite(radiusVor) && radiusVor > vMin + 1e-9 ? radiusVor : null
+    cursor = Number.isFinite(radiusVor) && radiusVor > minB + 1e-9 ? radiusVor : null
+  } else {
+    cursor = radius > minB + 1e-9 ? radius : null
   }
+  const cursorColor = which === 'voronoi' ? 'red' : 'blue'
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
-      {desc && <BarcodePlots barcodes={desc.barcodes} width={width} radius={cursor} />}
+      {desc && <BarcodePlots barcodes={desc.barcodes} width={width} radius={cursor} cursorColor={cursorColor} />}
     </div>
   )
 }
