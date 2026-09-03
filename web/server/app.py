@@ -207,6 +207,10 @@ def compute(req: ComputeRequest):
                 # cone approximation of the Voronoi filtration
                 'fStart': float(pv_pf[s]),
                 'fEnd': float(pv_pf[t]),
+                # quotient (canonical) vertex indices of the endpoints, so
+                # per-vertex quantities stay identical across periodic copies
+                'vStart': s,
+                'vEnd': t,
             })
         voronoi_geometry = {
             'points3x': vor_pts.T.tolist(),

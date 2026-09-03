@@ -55,8 +55,17 @@ export interface VoronoiGeometry {
   points3x: number[][] // full dual-skeleton vertices (circumcenters)
   fullEdges: number[][] // index pairs into points3x
   // resolved periodic Voronoi edges; fStart/fEnd are the filtration values
-  // of the start/end Voronoi vertices
-  arcs: { start: number[]; end: number[]; filtration: number; fStart: number; fEnd: number }[]
+  // of the start/end Voronoi vertices, vStart/vEnd their quotient
+  // (canonical) vertex indices
+  arcs: {
+    start: number[]
+    end: number[]
+    filtration: number
+    fStart: number
+    fEnd: number
+    vStart: number
+    vEnd: number
+  }[]
 }
 
 export interface ComputeResponse {
