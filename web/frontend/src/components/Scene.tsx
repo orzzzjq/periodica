@@ -298,28 +298,41 @@ function VoronoiPoints({ results }: { results: ComputeResponse }) {
   )
 }
 
-// 2D cone approximation of the Voronoi filtration: every tiled Voronoi edge
-// grows an isosceles triangle from each endpoint toward the other. A side
-// starts once F = f_Vor passes the endpoint's vertex filtration f_V; its
-// height along the edge is L·(F−f_V)/max(F−f_V, 2(f_E−f_V)) — reaching the
-// midpoint exactly when the edge is born (F = f_E) and the far endpoint at
-// the mirrored value 2f_E−f_V — and its base width is sqrt(F−f_V),
-// centered at the Voronoi point.
+// Cone approximation of the Voronoi filtration: every tiled Voronoi edge
+// grows a cone (2D: isosceles triangle) from each endpoint toward the
+// other. A side starts once F = f_Vor passes the endpoint's vertex
+// filtration f_V; its height along the edge grows linearly at rate
+// L/(2(f_E−f_V)) clamped at L — reaching the midpoint exactly when the
+// edge is born (F = f_E) and the far endpoint at the mirrored value
+// 2f_E−f_V. The base (diameter sqrt(F−f_V)) is centered at the Voronoi
+// point, which also carries a disk/ball of the same diameter.
 interface ConeEdge {
-  p1: [number, number]
-  p2: [number, number]
-  u: [number, number] // unit vector p1 -> p2
-  n: [number, number] // unit normal
+  p1: [number, number, number]
+  p2: [number, number, number]
+  u: [number, number, number] // unit vector p1 -> p2
+  n: [number, number] // in-plane unit normal (2D only)
   L: number
   fE: number
   fV1: number
   fV2: number
 }
 
-const CONE_Z = -0.009 // same layer the red balls used in 2D
+interface ConeSide {
+  pos: [number, number, number] // base center = Voronoi vertex
+  quat: THREE.Quaternion // rotates +Y onto the edge direction (3D only)
+  fV: number
+  fE: number
+  L: number
+}
+
+const CONE_Z = -0.009 // 2D drawing layer (same the red balls used)
+
+const coneHeight = (grow: number, L: number, fE: number, fV: number) =>
+  Math.max(0, Math.min(L, (grow * L) / (2 * (fE - fV))))
 
 function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeResponse; radiusVor: number }) {
   const opacity = useStore((s) => s.ui.ballOpacity)
+  const is2d = results.d === 2
 
   // static per-copy data: tiled once per compute result
   const edges = useMemo<ConeEdge[]>(() => {
@@ -333,12 +346,13 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
         const b = segs[k + 1]
         const dx = b[0] - a[0]
         const dy = b[1] - a[1]
-        const L = Math.hypot(dx, dy)
+        const dz = b[2] - a[2]
+        const L = Math.hypot(dx, dy, dz)
         if (L < 1e-12) continue
-        const u: [number, number] = [dx / L, dy / L]
+        const u: [number, number, number] = [dx / L, dy / L, dz / L]
         out.push({
-          p1: [a[0], a[1]],
-          p2: [b[0], b[1]],
+          p1: [a[0], a[1], a[2]],
+          p2: [b[0], b[1], b[2]],
           u,
           n: [-u[1], u[0]],
           L,
@@ -352,25 +366,48 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
   }, [results])
 
   // deduplicated tiled Voronoi points (a vertex is shared by several edge
-  // copies; its disk depends only on F - f_V, so draw it once)
+  // copies; its disk/ball depends only on F - f_V, so draw it once)
   const vertices = useMemo(() => {
-    const m = new Map<string, { p: [number, number]; fV: number }>()
+    const m = new Map<string, { p: [number, number, number]; fV: number }>()
     for (const e of edges) {
       const ends = [
         { p: e.p1, fV: e.fV1 },
         { p: e.p2, fV: e.fV2 },
       ]
       for (const v of ends) {
-        const key = `${v.p[0].toFixed(9)},${v.p[1].toFixed(9)}`
+        const key = v.p.map((c) => c.toFixed(9)).join(',')
         if (!m.has(key)) m.set(key, v)
       }
     }
     return [...m.values()]
   }, [edges])
 
+  // 3D: one oriented cone per edge side, direction static, size slider-driven
+  const coneSides = useMemo<ConeSide[]>(() => {
+    if (is2d) return []
+    const up = new THREE.Vector3(0, 1, 0)
+    const out: ConeSide[] = []
+    for (const e of edges) {
+      const dir = new THREE.Vector3(...e.u)
+      out.push(
+        { pos: e.p1, quat: new THREE.Quaternion().setFromUnitVectors(up, dir), fV: e.fV1, fE: e.fE, L: e.L },
+        {
+          pos: e.p2,
+          quat: new THREE.Quaternion().setFromUnitVectors(up, dir.clone().negate()),
+          fV: e.fV2,
+          fE: e.fE,
+          L: e.L,
+        },
+      )
+    }
+    return out
+  }, [edges, is2d])
+
   const F = Number.isFinite(radiusVor) ? radiusVor : -Infinity
 
+  // 2D: all triangles in one buffer
   const positions = useMemo(() => {
+    if (!is2d) return new Float32Array(0)
     const arr: number[] = []
     for (const e of edges) {
       const sides = [
@@ -380,11 +417,8 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
       for (const { c, fV, dir } of sides) {
         const grow = F - fV
         if (grow <= 0) continue
-        // linear growth at rate L / (2 (f_E - f_V)), clamped at L: reaches
-        // the midpoint when the edge is born (F = f_E) and the full edge
-        // length at the mirrored value F = 2 f_E - f_V
-        const h = Math.max(0, Math.min(e.L, (grow * e.L) / (2 * (e.fE - fV))))
-        const w2 = Math.sqrt(grow) / 2 // base width sqrt(F - f_V)
+        const h = coneHeight(grow, e.L, e.fE, fV)
+        const w2 = Math.sqrt(grow) / 2 // half base width
         arr.push(
           c[0] + e.n[0] * w2, c[1] + e.n[1] * w2, CONE_Z,
           c[0] - e.n[0] * w2, c[1] - e.n[1] * w2, CONE_Z,
@@ -393,7 +427,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
       }
     }
     return new Float32Array(arr)
-  }, [edges, F])
+  }, [edges, F, is2d])
 
   const geometry = useMemo(() => {
     const g = new THREE.BufferGeometry()
@@ -402,43 +436,100 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
   }, [positions])
   useEffect(() => () => geometry.dispose(), [geometry])
 
-  // same flat-union stencil family as the red Voronoi balls (ref 2)
+  // same flat-union stencil family as before (ref 2); lit in 3D
   const material = useMemo(() => {
-    const m = new THREE.MeshBasicMaterial({
-      color: '#e08f8f',
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    })
+    const m = is2d
+      ? new THREE.MeshBasicMaterial({
+          color: '#e08f8f',
+          transparent: true,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        })
+      : new THREE.MeshPhongMaterial({
+          color: '#e08f8f',
+          specular: '#888888',
+          shininess: 60,
+          transparent: true,
+          depthWrite: false,
+        })
     m.stencilWrite = true
     m.stencilRef = 2
     m.stencilFunc = THREE.NotEqualStencilFunc
     m.stencilZPass = THREE.ReplaceStencilOp
     return m
-  }, [])
+  }, [is2d])
   material.opacity = opacity
   useEffect(() => () => material.dispose(), [material])
 
-  // shared unit disk, scaled per vertex: diameter = the triangle base width
+  // shared unit shapes, scaled per use
   const unitCircle = useMemo(() => new THREE.CircleGeometry(1, 48), [])
   useEffect(() => () => unitCircle.dispose(), [unitCircle])
+  const unitCone = useMemo(() => {
+    // base center at the origin, apex at +Y = 1
+    const g = new THREE.ConeGeometry(1, 1, 32)
+    g.translate(0, 0.5, 0)
+    return g
+  }, [])
+  useEffect(() => () => unitCone.dispose(), [unitCone])
+  const unitSphere = useMemo(() => new THREE.SphereGeometry(1, 32, 32), [])
+  useEffect(() => () => unitSphere.dispose(), [unitSphere])
 
-  if (positions.length === 0) return null
+  // stencil first-drawn-wins: draw nearest-first so the closest lit surface
+  // owns the overlap (same trick as the Delaunay balls)
+  const groupRef = useRef<THREE.Group>(null)
+  useFrame(({ camera }) => {
+    if (is2d || !groupRef.current) return
+    for (const m of groupRef.current.children) {
+      m.renderOrder = m.position.distanceTo(camera.position)
+    }
+  })
+
+  if (is2d) {
+    if (positions.length === 0) return null
+    return (
+      <group>
+        <mesh geometry={geometry} material={material} />
+        {vertices.map((v, i) => {
+          const grow = F - v.fV
+          if (grow <= 0) return null
+          const r = Math.sqrt(grow) / 2 // radius = base width / 2
+          return (
+            <mesh
+              key={i}
+              geometry={unitCircle}
+              material={material}
+              position={[v.p[0], v.p[1], CONE_Z]}
+              scale={r}
+            />
+          )
+        })}
+      </group>
+    )
+  }
+
   return (
-    <group>
-      <mesh geometry={geometry} material={material} />
+    <group ref={groupRef}>
+      {coneSides.map((s, i) => {
+        const grow = F - s.fV
+        if (grow <= 0) return null
+        const h = coneHeight(grow, s.L, s.fE, s.fV)
+        const r = Math.sqrt(grow) / 2 // base radius = base width / 2
+        return (
+          <mesh
+            key={`c${i}`}
+            geometry={unitCone}
+            material={material}
+            position={s.pos}
+            quaternion={s.quat}
+            scale={[r, h, r]}
+          />
+        )
+      })}
       {vertices.map((v, i) => {
         const grow = F - v.fV
         if (grow <= 0) return null
-        const r = Math.sqrt(grow) / 2 // radius = base width / 2
         return (
-          <mesh
-            key={i}
-            geometry={unitCircle}
-            material={material}
-            position={[v.p[0], v.p[1], CONE_Z]}
-            scale={r}
-          />
+          <mesh key={`s${i}`} geometry={unitSphere} material={material} position={v.p} scale={Math.sqrt(grow) / 2} />
         )
       })}
     </group>
@@ -549,20 +640,6 @@ function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius
   return <Balls items={items} is2d={results.d === 2} color="#8fb0e8" stencilRef={1} z2d={-0.01} />
 }
 
-// Voronoi filtration balls: centered at the Voronoi points, uniform radius
-// f_Vor - min(f_Vor), light red.
-function VoronoiFiltrationBalls({ results, radiusVor }: { results: ComputeResponse; radiusVor: number }) {
-  const g = results.voronoiGeometry
-  let vMin = Infinity
-  if (results.voronoi)
-    for (const bars of results.voronoi.barcodes) for (const b of bars) vMin = Math.min(vMin, b.birth)
-  if (!g || !Number.isFinite(vMin)) return null
-  const r = (Number.isFinite(radiusVor) ? Math.max(radiusVor, vMin) : vMin) - vMin
-  if (r <= 0) return null
-  const items = g.points3x.map((p) => ({ p, r }))
-  return <Balls items={items} is2d={results.d === 2} color="#e08f8f" stencilRef={2} z2d={-0.009} />
-}
-
 export default function Scene() {
   const results = useStore((s) => s.results)
   const ui = useStore((s) => s.ui)
@@ -616,12 +693,7 @@ export default function Scene() {
       {ui.showPoints && <Points results={results} />}
       {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
       {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
-      {ui.showVoronoiBalls &&
-        (is2d ? (
-          <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />
-        ) : (
-          <VoronoiFiltrationBalls results={results} radiusVor={ui.radiusVor} />
-        ))}
+      {ui.showVoronoiBalls && <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />}
     </Canvas>
   )
 }
