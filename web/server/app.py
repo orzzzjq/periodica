@@ -146,7 +146,17 @@ def compute(req: ComputeRequest):
             'multiplicity': float(multiplicity),
         }
 
-    def encode_descriptors(barcodes, images):
+    def encode_tree(tree):
+        # merge tree as event beams: per quotient vertex a time-sorted list of
+        # (time, coeff, exponent, child) — child -1 = plain monomial event,
+        # child == beam index = own death, else id of the beam merging in.
+        return [
+            [[None if np.isinf(t) else float(t), float(c), int(e), int(ch)]
+             for (t, c, e, ch) in beam]
+            for beam in tree
+        ]
+
+    def encode_descriptors(barcodes, images, tree):
         # x-range of the persistence images, matching Periodica.images()
         xmin = min(min(bar[0] for bar in bars) for bars in barcodes)
         xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes)
@@ -159,6 +169,7 @@ def compute(req: ComputeRequest):
                 'xmax': float(xmax + 0.12 * xspan),
                 'data': [np.asarray(img).tolist() for img in images],
             },
+            'tree': encode_tree(tree),
         }
 
     # Voronoi descriptors + scene geometry from a single periodic_voronoi call
@@ -179,7 +190,7 @@ def compute(req: ComputeRequest):
         q.quotient_arc_filtration = pv_ef
         q.quotient_arc_shift = pv_shift
         q.merge_tree()
-        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize))
+        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize), q.tree)
 
         # geometry overlay, mirroring plot_voronoi
         vor_pts, vor_edges = _periodica.full_voronoi(U, points, weights, True)
@@ -205,7 +216,7 @@ def compute(req: ComputeRequest):
     except Exception as e:
         voronoi_error = str(e)
 
-    delaunay_desc = encode_descriptors(barcodes, images)
+    delaunay_desc = encode_descriptors(barcodes, images, p.tree)
 
     return {
         'voronoi': voronoi,
@@ -232,6 +243,7 @@ def compute(req: ComputeRequest):
         'maxRadius': float(max_radius),
         'barcodes': delaunay_desc['barcodes'],
         'images': delaunay_desc['images'],
+        'tree': delaunay_desc['tree'],
     }
 
 

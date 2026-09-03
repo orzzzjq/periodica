@@ -39,9 +39,16 @@ export interface ImagesData {
   data: number[][][] // d+1 images
 }
 
+// Merge tree event: [time, coeff, exponent, child]. time null = infinity;
+// the shadow monomial after the event is coeff·R^exponent; child -1 = plain
+// monomial event, child == own beam index = death (merge into another beam),
+// any other value = the beam that merged into this one at this time.
+export type TreeEvent = [number | null, number, number, number]
+
 export interface Descriptors {
   barcodes: Bar[][] // d+1 lists
   images: ImagesData
+  tree: TreeEvent[][] // one time-sorted event beam per quotient vertex
 }
 
 export interface VoronoiGeometry {
@@ -75,6 +82,7 @@ export interface ComputeResponse {
   maxRadius: number
   barcodes: Bar[][] // d+1 lists (Delaunay)
   images: ImagesData // (Delaunay)
+  tree: TreeEvent[][] // (Delaunay)
 }
 
 /** True iff p satisfies A·x <= scale·b, i.e. lies in the scaled Dirichlet

@@ -1,9 +1,9 @@
 import { create } from 'zustand'
 import { useStore } from './store'
 
-export type PanelId = 'input' | 'scene' | 'barcode' | 'diagram' | 'image'
+export type PanelId = 'input' | 'scene' | 'barcode' | 'diagram' | 'image' | 'tree'
 
-export const PANEL_IDS: PanelId[] = ['input', 'scene', 'barcode', 'diagram', 'image']
+export const PANEL_IDS: PanelId[] = ['input', 'scene', 'barcode', 'diagram', 'image', 'tree']
 
 export const PANEL_TITLES: Record<PanelId, string> = {
   input: 'Input',
@@ -11,6 +11,7 @@ export const PANEL_TITLES: Record<PanelId, string> = {
   barcode: 'Barcode',
   diagram: 'Diagram',
   image: 'Image',
+  tree: 'Merge tree',
 }
 
 export const HEADER_H = 32
@@ -99,6 +100,18 @@ function defaultLayout(): Record<string, PanelGroup> {
     { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode'], active: 'barcode' },
     { id: newId(), x: at(diagramW), y: gap, w: diagramW, h: descH, z: 4, minimized: false, tabs: ['diagram'], active: 'diagram' },
     { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 5, minimized: false, tabs: ['image'], active: 'image' },
+    // merge tree: its own window, minimized into the app bar by default
+    {
+      id: newId(),
+      x: inputW + 2 * gap,
+      y: gap + 48,
+      w: Math.max(sceneW + barcodeW, 640),
+      h: 340,
+      z: 6,
+      minimized: true,
+      tabs: ['tree'],
+      active: 'tree',
+    },
   ]
   return Object.fromEntries(groups.map((g) => [g.id, g]))
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout } from 'plotly.js'
 import createPlotlyComponent from 'react-plotly.js/factory'
-import type { Bar, Descriptors, ImagesData } from '../api'
+import type { Bar, Descriptors, ImagesData, TreeEvent } from '../api'
 import { useStore } from '../store'
 
 const Plot = createPlotlyComponent(Plotly)
@@ -375,7 +375,7 @@ function useDescriptors(): { desc: Descriptors | null; error: string | null } {
   if (which === 'voronoi') {
     return { desc: results.voronoi, error: results.voronoi ? null : (results.voronoiError ?? 'Voronoi unavailable') }
   }
-  return { desc: { barcodes: results.barcodes, images: results.images }, error: null }
+  return { desc: { barcodes: results.barcodes, images: results.images, tree: results.tree }, error: null }
 }
 
 function DescError({ error }: { error: string | null }) {
@@ -449,6 +449,197 @@ export function ImagePanel() {
       <DescError error={error} />
       {desc && (
         <ImagePlots images={desc.images} sameRange={sameRange} size={size} cursor={cursor} cursorColor={cursorColor} />
+      )}
+    </div>
+  )
+}
+
+// ---- merge tree ----
+
+const SUPERSCRIPTS = ['⁰', '¹', '²', '³']
+
+// pretty-print a shadow-monomial coefficient, recognizing k·π and k·π/3
+function fmtCoeff(c: number): string {
+  for (let k = 1; k <= 12; k++) {
+    if (Math.abs(c - k * Math.PI) < 1e-9) return k === 1 ? 'π' : `${k}π`
+  }
+  for (let k = 1; k <= 12; k++) {
+    if (k % 3 !== 0 && Math.abs(c - (k * Math.PI) / 3) < 1e-9) return `${k}π/3`
+  }
+  if (Math.abs(c - Math.round(c)) < 1e-9) return String(Math.round(c))
+  return String(parseFloat(c.toPrecision(3)))
+}
+
+function monomialText(coeff: number, exp: number): string {
+  if (exp === 0) return fmtCoeff(coeff)
+  const co = fmtCoeff(coeff)
+  return `${co === '1' ? '' : co}R${exp === 1 ? '' : SUPERSCRIPTS[exp]}`
+}
+
+interface TreeBranch {
+  birth: number
+  death: number | null // null = essential branch, extends to xmax
+  row: number
+  parentRow: number | null
+  events: { t: number; label: string }[] // monomial events (ticks + labels)
+}
+
+// Left-to-right layout, root at the bottom. Recursive placement: a branch
+// takes the next row, then its children (sorted by merge time, earliest
+// first) stack their subtrees above it. Every branch in an earlier-merging
+// subtree is dead before a later sibling's merge time, so the later
+// sibling's vertical connector crosses no live line.
+function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
+  const n = tree.length
+  const parent = new Array<number>(n).fill(-1)
+  const death = new Array<number | null>(n).fill(null)
+  const children: { id: number; t: number }[][] = Array.from({ length: n }, () => [])
+  for (let k = 0; k < n; k++) {
+    for (const [t, , , child] of tree[k]) {
+      if (child !== -1 && child !== k && t !== null) {
+        parent[child] = k
+        death[child] = t
+        children[k].push({ id: child, t })
+      }
+    }
+  }
+  const rows = new Array<number>(n).fill(0)
+  let next = 0
+  const place = (i: number) => {
+    rows[i] = next++
+    children[i].sort((a, b) => a.t - b.t)
+    for (const c of children[i]) place(c.id)
+  }
+  const roots = [...Array(n).keys()].filter((i) => parent[i] === -1)
+  roots.sort((a, b) => (tree[a][0]?.[0] ?? 0) - (tree[b][0]?.[0] ?? 0))
+  for (const r of roots) place(r)
+
+  const branches: TreeBranch[] = []
+  for (let i = 0; i < n; i++) {
+    const beam = tree[i]
+    if (beam.length === 0) continue
+    const events: { t: number; label: string }[] = []
+    for (const [t, coeff, exp, child] of beam) {
+      if (child === i || t === null) continue // own death: monomial unchanged
+      events.push({ t, label: monomialText(coeff, exp) })
+    }
+    branches.push({
+      birth: beam[0][0] ?? 0,
+      death: death[i],
+      row: rows[i],
+      parentRow: parent[i] === -1 ? null : rows[parent[i]],
+      events,
+    })
+  }
+  return branches
+}
+
+function MergeTreePlot({
+  tree,
+  barcodes,
+  width,
+  cursor,
+  cursorColor,
+}: {
+  tree: TreeEvent[][]
+  barcodes: Bar[][]
+  width: number
+  cursor: number | null
+  cursorColor: string
+}) {
+  const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
+  const branches = useMemo(() => layoutTree(tree), [tree])
+  const maxRow = branches.reduce((m, b) => Math.max(m, b.row), 0)
+
+  // one polyline trace: horizontal beam, then the vertical drop to the parent
+  const lx: (number | null)[] = []
+  const ly: (number | null)[] = []
+  for (const b of branches) {
+    lx.push(b.birth, b.death ?? xmax)
+    ly.push(b.row, b.row)
+    if (b.parentRow !== null && b.death !== null) {
+      lx.push(b.death)
+      ly.push(b.parentRow)
+    }
+    lx.push(null)
+    ly.push(null)
+  }
+
+  const ex: number[] = []
+  const ey: number[] = []
+  const etext: string[] = []
+  for (const b of branches)
+    for (const ev of b.events) {
+      ex.push(ev.t)
+      ey.push(b.row)
+      etext.push(ev.label)
+    }
+
+  const traces: Data[] = [
+    { x: lx, y: ly, mode: 'lines', line: { color: 'black', width: 2.5 }, hoverinfo: 'skip' },
+    {
+      x: ex,
+      y: ey,
+      mode: 'markers',
+      marker: { symbol: 'line-ns-open', size: 7, color: 'black', line: { width: 1.5 } },
+      hoverinfo: 'text',
+      hovertext: ex.map((t, i) => `${etext[i]} @ ${t.toFixed(3)}`),
+    },
+    {
+      x: ex,
+      y: ey,
+      mode: 'text',
+      text: etext,
+      textposition: 'top center',
+      textfont: { size: 10 },
+      cliponaxis: false,
+      hoverinfo: 'skip',
+    },
+  ]
+
+  const cursorLine: NonNullable<Partial<Layout>['shapes']> =
+    cursor !== null
+      ? [
+          {
+            type: 'line',
+            x0: cursor,
+            x1: cursor,
+            y0: 0,
+            y1: 1,
+            yref: 'paper',
+            line: { color: cursorColor, width: 1, dash: 'dash' },
+          },
+        ]
+      : []
+
+  const height = Math.max(PANEL_HEIGHT, 42 + (maxRow + 1) * 26 + 16)
+  const layout: Partial<Layout> = {
+    width,
+    height,
+    margin: { l: 46, r: 46, t: 8, b: 34 },
+    xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
+    yaxis: { visible: false, range: [-0.9, maxRow + 1.1] },
+    showlegend: false,
+    shapes: [...(BORDER ?? []), ...cursorLine],
+  }
+  return <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
+}
+
+export function MergeTreePanel() {
+  const { desc, error } = useDescriptors()
+  const { ref, width } = usePanelWidth()
+  const { cursor, cursorColor } = useFiltrationCursor(desc)
+  return (
+    <div className="plots" ref={ref}>
+      <DescError error={error} />
+      {desc?.tree && (
+        <MergeTreePlot
+          tree={desc.tree}
+          barcodes={desc.barcodes}
+          width={width}
+          cursor={cursor}
+          cursorColor={cursorColor}
+        />
       )}
     </div>
   )
