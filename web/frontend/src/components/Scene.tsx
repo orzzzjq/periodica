@@ -301,9 +301,10 @@ function VoronoiPoints({ results }: { results: ComputeResponse }) {
 // 2D cone approximation of the Voronoi filtration: every tiled Voronoi edge
 // grows an isosceles triangle from each endpoint toward the other. A side
 // starts once F = f_Vor passes the endpoint's vertex filtration f_V; its
-// height along the edge is (L/2)·(F−f_V)/max(F−f_V, f_E−f_V) — reaching the
-// midpoint exactly when the edge is born (F = f_E) and stopping there — and
-// its base width is F−f_V, centered at the Voronoi point.
+// height along the edge is L·(F−f_V)/max(F−f_V, 2(f_E−f_V)) — reaching the
+// midpoint exactly when the edge is born (F = f_E) and the far endpoint at
+// the mirrored value 2f_E−f_V — and its base width is sqrt(F−f_V),
+// centered at the Voronoi point.
 interface ConeEdge {
   p1: [number, number]
   p2: [number, number]
@@ -350,6 +351,23 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     return out
   }, [results])
 
+  // deduplicated tiled Voronoi points (a vertex is shared by several edge
+  // copies; its disk depends only on F - f_V, so draw it once)
+  const vertices = useMemo(() => {
+    const m = new Map<string, { p: [number, number]; fV: number }>()
+    for (const e of edges) {
+      const ends = [
+        { p: e.p1, fV: e.fV1 },
+        { p: e.p2, fV: e.fV2 },
+      ]
+      for (const v of ends) {
+        const key = `${v.p[0].toFixed(9)},${v.p[1].toFixed(9)}`
+        if (!m.has(key)) m.set(key, v)
+      }
+    }
+    return [...m.values()]
+  }, [edges])
+
   const F = Number.isFinite(radiusVor) ? radiusVor : -Infinity
 
   const positions = useMemo(() => {
@@ -362,8 +380,11 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
       for (const { c, fV, dir } of sides) {
         const grow = F - fV
         if (grow <= 0) continue
-        const h = (e.L / 2) * (grow / Math.max(grow, e.fE - fV))
-        const w2 = grow / 2
+        // linear growth at rate L / (2 (f_E - f_V)), clamped at L: reaches
+        // the midpoint when the edge is born (F = f_E) and the full edge
+        // length at the mirrored value F = 2 f_E - f_V
+        const h = Math.max(0, Math.min(e.L, (grow * e.L) / (2 * (e.fE - fV))))
+        const w2 = Math.sqrt(grow) / 2 // base width sqrt(F - f_V)
         arr.push(
           c[0] + e.n[0] * w2, c[1] + e.n[1] * w2, CONE_Z,
           c[0] - e.n[0] * w2, c[1] - e.n[1] * w2, CONE_Z,
@@ -398,8 +419,30 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
   material.opacity = opacity
   useEffect(() => () => material.dispose(), [material])
 
+  // shared unit disk, scaled per vertex: diameter = the triangle base width
+  const unitCircle = useMemo(() => new THREE.CircleGeometry(1, 48), [])
+  useEffect(() => () => unitCircle.dispose(), [unitCircle])
+
   if (positions.length === 0) return null
-  return <mesh geometry={geometry} material={material} />
+  return (
+    <group>
+      <mesh geometry={geometry} material={material} />
+      {vertices.map((v, i) => {
+        const grow = F - v.fV
+        if (grow <= 0) return null
+        const r = Math.sqrt(grow) / 2 // radius = base width / 2
+        return (
+          <mesh
+            key={i}
+            geometry={unitCircle}
+            material={material}
+            position={[v.p[0], v.p[1], CONE_Z]}
+            scale={r}
+          />
+        )
+      })}
+    </group>
+  )
 }
 
 // Sublevel set of the Voronoi filtration at f_Vor (the Voronoi filtration
