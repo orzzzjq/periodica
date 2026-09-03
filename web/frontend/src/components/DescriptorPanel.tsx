@@ -228,7 +228,17 @@ function BarcodePlots({
   )
 }
 
-function DiagramPlots({ barcodes, size }: { barcodes: Bar[][]; size: number }) {
+function DiagramPlots({
+  barcodes,
+  size,
+  cursor,
+  cursorColor,
+}: {
+  barcodes: Bar[][]
+  size: number
+  cursor: number | null
+  cursorColor: string
+}) {
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.12)
   const dims = [...barcodes.keys()].reverse()
   return (
@@ -273,6 +283,7 @@ function DiagramPlots({ barcodes, size }: { barcodes: Bar[][]; size: number }) {
           })
         }
         const layout = squareLayout(i, xmin, xmax, size)
+        layout.shapes = [...(layout.shapes ?? []), ...cursorSegments(cursor, cursorColor, xmin, xmax)]
         return (
           <div key={i} className="square-plot">
             <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
@@ -283,7 +294,19 @@ function DiagramPlots({ barcodes, size }: { barcodes: Bar[][]; size: number }) {
   )
 }
 
-function ImagePlots({ images, sameRange, size }: { images: ImagesData; sameRange: boolean; size: number }) {
+function ImagePlots({
+  images,
+  sameRange,
+  size,
+  cursor,
+  cursorColor,
+}: {
+  images: ImagesData
+  sameRange: boolean
+  size: number
+  cursor: number | null
+  cursorColor: string
+}) {
   const { xmin, xmax, data, size: gridSize } = images
   const axis = useMemo(
     () => Array.from({ length: gridSize }, (_, k) => xmin + ((k + 0.5) / gridSize) * (xmax - xmin)),
@@ -331,6 +354,7 @@ function ImagePlots({ images, sameRange, size }: { images: ImagesData; sameRange
           },
         ]
         const layout = squareLayout(i, xmin, xmax, size, IMG_RIGHT_MARGIN)
+        layout.shapes = [...(layout.shapes ?? []), ...cursorSegments(cursor, cursorColor, xmin, xmax)]
         return (
           <div key={i} className="square-plot">
             <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
@@ -358,16 +382,12 @@ function DescError({ error }: { error: string | null }) {
   return error ? <div className="desc-error">Voronoi computation failed: {error}</div> : null
 }
 
-export function BarcodePanel() {
-  const { desc, error } = useDescriptors()
+// Filtration cursor for the active complex: f_Del (blue) or f_Vor (red),
+// hidden (null) while its slider sits at the barcode's minimum birth.
+function useFiltrationCursor(desc: Descriptors | null): { cursor: number | null; cursorColor: string } {
   const radius = useStore((s) => s.ui.radius)
   const radiusVor = useStore((s) => s.ui.radiusVor)
   const which = useStore((s) => s.ui.complexType)
-  const { ref, width } = usePanelWidth()
-  // Each barcode follows its own filtration slider (f_Del / f_Vor), drawn
-  // in its complex's color (blue Delaunay, red Voronoi). No cursor while a
-  // slider sits at its minimum (the barcode's earliest birth — which is
-  // negative in the weighted case, not 0).
   const minB = desc ? xRange(desc.barcodes, 0, 0)[0] : -Infinity
   let cursor: number | null
   if (which === 'voronoi') {
@@ -375,7 +395,30 @@ export function BarcodePanel() {
   } else {
     cursor = radius > minB + 1e-9 ? radius : null
   }
-  const cursorColor = which === 'voronoi' ? 'red' : 'blue'
+  return { cursor, cursorColor: which === 'voronoi' ? 'red' : 'blue' }
+}
+
+// The diagram/image cursor: for threshold f, the vertical segment x=f with
+// y from f to ymax and the horizontal segment y=f with x from xmin to f —
+// the boundary of the region of (birth, death) pairs alive at f.
+function cursorSegments(
+  cursor: number | null,
+  cursorColor: string,
+  xmin: number,
+  xmax: number,
+): NonNullable<Partial<Layout>['shapes']> {
+  if (cursor === null) return []
+  const line = { color: cursorColor, width: 1, dash: 'dash' as const }
+  return [
+    { type: 'line', x0: cursor, x1: cursor, y0: cursor, y1: xmax, line },
+    { type: 'line', x0: xmin, x1: cursor, y0: cursor, y1: cursor, line },
+  ]
+}
+
+export function BarcodePanel() {
+  const { desc, error } = useDescriptors()
+  const { ref, width } = usePanelWidth()
+  const { cursor, cursorColor } = useFiltrationCursor(desc)
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
@@ -388,10 +431,11 @@ export function DiagramPanel() {
   const results = useStore((s) => s.results)
   const { desc, error } = useDescriptors()
   const { ref, size } = useSquareSize((results?.d ?? 2) + 1, 12)
+  const { cursor, cursorColor } = useFiltrationCursor(desc)
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
-      {desc && <DiagramPlots barcodes={desc.barcodes} size={size} />}
+      {desc && <DiagramPlots barcodes={desc.barcodes} size={size} cursor={cursor} cursorColor={cursorColor} />}
     </div>
   )
 }
@@ -401,10 +445,13 @@ export function ImagePanel() {
   const { desc, error } = useDescriptors()
   const sameRange = useStore((s) => s.ui.sameRange)
   const { ref, size } = useSquareSize((results?.d ?? 2) + 1, IMG_RIGHT_MARGIN)
+  const { cursor, cursorColor } = useFiltrationCursor(desc)
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
-      {desc && <ImagePlots images={desc.images} sameRange={sameRange} size={size} />}
+      {desc && (
+        <ImagePlots images={desc.images} sameRange={sameRange} size={size} cursor={cursor} cursorColor={cursorColor} />
+      )}
     </div>
   )
 }
