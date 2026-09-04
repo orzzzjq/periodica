@@ -355,7 +355,7 @@ interface ConeSide {
   pos: [number, number, number] // base center = Voronoi vertex
   quat: THREE.Quaternion // rotates +Y onto the edge direction (3D only)
   fV: number
-  fE: number
+  denom: number // shared growth-rate denominator 2 f_E - (f_V1 + f_V2)
   L: number
   qv: number // quotient vertex index of the base center
 }
@@ -364,9 +364,16 @@ const CONE_Z = -0.009 // 2D drawing layer (same the red balls used)
 
 // virtual cone height — NOT clamped at the edge length L: past L the apex
 // keeps extending (so the base-diameter cap keeps growing) and the drawn
-// solid is truncated at L into a frustum
-const coneHeight = (grow: number, L: number, fE: number, fV: number) =>
-  Math.max(0, (grow * L) / (2 * (fE - fV)))
+// solid is truncated at L into a frustum.
+// Both ends of an edge grow at the same rate L / (2 f_E - (f_V1 + f_V2)),
+// so the two cones meet exactly at F = f_E, at the split point of the edge
+// determined by the two endpoint filtrations:
+//   h = (F - f_V) · L / denom,  denom = 2 f_E - (f_V1 + f_V2)
+const coneHeight = (grow: number, L: number, denom: number) =>
+  Math.max(0, (grow * L) / denom)
+
+// shared growth-rate denominator of an edge's two cones
+const coneDenom = (fE: number, fV1: number, fV2: number) => 2 * fE - (fV1 + fV2)
 
 // top/bottom radius ratio of the frustum left when a virtual cone of
 // height hVirt > L is cut at L (as hVirt → ∞ it approaches a cylinder)
@@ -435,12 +442,13 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     const out: ConeSide[] = []
     for (const e of edges) {
       const dir = new THREE.Vector3(...e.u)
+      const denom = coneDenom(e.fE, e.fV1, e.fV2)
       out.push(
         {
           pos: e.p1,
           quat: new THREE.Quaternion().setFromUnitVectors(up, dir),
           fV: e.fV1,
-          fE: e.fE,
+          denom,
           L: e.L,
           qv: e.qv1,
         },
@@ -448,7 +456,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
           pos: e.p2,
           quat: new THREE.Quaternion().setFromUnitVectors(up, dir.clone().negate()),
           fV: e.fV2,
-          fE: e.fE,
+          denom,
           L: e.L,
           qv: e.qv2,
         },
@@ -480,9 +488,10 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
         { fV: arc.fStart, qv: arc.vStart },
         { fV: arc.fEnd, qv: arc.vEnd },
       ]
+      const denom = coneDenom(arc.filtration, arc.fStart, arc.fEnd)
       for (const { fV, qv } of sides) {
         const grow = F - fV
-        const h = grow <= 0 ? 0 : coneHeight(grow, L, arc.filtration, fV)
+        const h = grow <= 0 ? 0 : coneHeight(grow, L, denom)
         const prev = cap.get(qv)
         if (prev === undefined || h < prev) cap.set(qv, h)
       }
@@ -503,10 +512,11 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
         { c: e.p1, fV: e.fV1, dir: 1, qv: e.qv1 },
         { c: e.p2, fV: e.fV2, dir: -1, qv: e.qv2 },
       ]
+      const denom = coneDenom(e.fE, e.fV1, e.fV2)
       for (const { c, fV, dir, qv } of sides) {
         const grow = F - fV
         if (grow <= 0) continue
-        const hv = coneHeight(grow, e.L, e.fE, fV) // virtual height
+        const hv = coneHeight(grow, e.L, denom) // virtual height
         const w2 = baseRadius(grow, qv) // half base width
         const b1x = c[0] + e.n[0] * w2
         const b1y = c[1] + e.n[1] * w2
@@ -642,7 +652,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
       {coneSides.map((s, i) => {
         const grow = F - s.fV
         if (grow <= 0) return null
-        const hv = coneHeight(grow, s.L, s.fE, s.fV) // virtual height
+        const hv = coneHeight(grow, s.L, s.denom) // virtual height
         const r = baseRadius(grow, s.qv) // base radius = capped base width / 2
         if (r <= 0) return null
         const cut = hv > s.L
