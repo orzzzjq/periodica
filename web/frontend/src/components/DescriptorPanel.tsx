@@ -488,6 +488,8 @@ interface TreeBranch {
   death: number | null // null = essential branch, extends to xmax
   row: number
   parentRow: number | null
+  subtreeRows: number // the subtree occupies rows [row, row + subtreeRows)
+  subtreeMinBirth: number // earliest birth in the subtree
   events: { t: number; label: string }[] // monomial events (ticks + labels)
 }
 
@@ -511,11 +513,19 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
     }
   }
   const rows = new Array<number>(n).fill(0)
+  const subRows = new Array<number>(n).fill(1)
+  const subMin = new Array<number>(n).fill(Infinity)
   let next = 0
   const place = (i: number) => {
     rows[i] = next++
     children[i].sort((a, b) => a.t - b.t)
-    for (const c of children[i]) place(c.id)
+    let mb = tree[i][0]?.[0] ?? 0
+    for (const c of children[i]) {
+      place(c.id)
+      mb = Math.min(mb, subMin[c.id])
+    }
+    subRows[i] = next - rows[i]
+    subMin[i] = mb
   }
   const roots = [...Array(n).keys()].filter((i) => parent[i] === -1)
   roots.sort((a, b) => (tree[a][0]?.[0] ?? 0) - (tree[b][0]?.[0] ?? 0))
@@ -554,6 +564,8 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
       death: death[i],
       row: rows[i],
       parentRow: parent[i] === -1 ? null : rows[parent[i]],
+      subtreeRows: subRows[i],
+      subtreeMinBirth: subMin[i],
       events,
     })
   }
@@ -581,6 +593,28 @@ function MergeTreePlot({
   const branches = useMemo(() => layoutTree(tree), [tree])
   const maxRow = branches.reduce((m, b) => Math.max(m, b.row), 0)
 
+  // interactive view: null = full tree; clicking a hover point zooms to the
+  // subtree rooted there; manual drag-zooms are kept via onRelayout
+  const view = useStore((s) => s.ui.treeView)
+  const setUi = useStore((s) => s.setUi)
+  const rowToBranch = useMemo(() => new Map(branches.map((b) => [b.row, b])), [branches])
+
+  const zoomToSubtree = (row: number, t: number) => {
+    const b = rowToBranch.get(row)
+    if (!b) return
+    // subtree bounding rectangle with symmetric padding, clamped to the
+    // default (full-view) axis ranges
+    const w = t - b.subtreeMinBirth || (xmax - xmin) * 0.01
+    const rTop = b.row + b.subtreeRows - 1
+    const padY = Math.max(0.08 * (rTop - b.row), 0.9)
+    setUi({
+      treeView: {
+        x: [Math.max(xmin, b.subtreeMinBirth - 0.08 * w), Math.min(xmax, t + 0.08 * w)],
+        y: [Math.max(-0.9, b.row - padY), Math.min(maxRow + 1.1, rTop + padY)],
+      },
+    })
+  }
+
   // one polyline trace: horizontal beam, then the vertical drop to the parent
   const lx: (number | null)[] = []
   const ly: (number | null)[] = []
@@ -605,6 +639,17 @@ function MergeTreePlot({
       etext.push(ev.label)
     }
 
+  // invisible hover targets at the merge corners (where a branch turns
+  // down into its parent)
+  const mx: number[] = []
+  const my: number[] = []
+  for (const b of branches) {
+    if (b.death !== null && b.parentRow !== null) {
+      mx.push(b.death)
+      my.push(b.row)
+    }
+  }
+
   const traces: Data[] = [
     { x: lx, y: ly, mode: 'lines', line: { color: 'black', width: 2.5 }, hoverinfo: 'skip' },
     {
@@ -614,6 +659,17 @@ function MergeTreePlot({
       marker: { symbol: 'line-ns-open', size: 7, color: 'black', line: { width: 1.5 } },
       hoverinfo: 'text',
       hovertext: ex.map((t, i) => `${etext[i]} (${t.toFixed(3)})`),
+    },
+    {
+      x: mx,
+      y: my,
+      mode: 'markers',
+      marker: { size: 10, color: 'rgba(0,0,0,0)' },
+      hoverinfo: 'text',
+      hovertext: mx.map((t) => `merge (${t.toFixed(3)})`),
+      // the tooltip background inherits the (transparent) marker color;
+      // pin it to the same opaque style as the event tooltips
+      hoverlabel: { bgcolor: 'black', font: { color: 'white' } },
     },
   ]
   if (showLabels) {
@@ -653,12 +709,36 @@ function MergeTreePlot({
     width,
     height: plotHeight,
     margin: { l: 46, r: 46, t: 8, b: 34 },
-    xaxis: { range: [xmin, xmax], zeroline: false, ...TICKS },
-    yaxis: { visible: false, range: [-0.9, maxRow + 1.1] },
+    xaxis: { range: view?.x ?? [xmin, xmax], zeroline: false, ...TICKS },
+    yaxis: { visible: false, range: view?.y ?? [-0.9, maxRow + 1.1] },
     showlegend: false,
     shapes: [...(BORDER ?? []), ...cursorLine],
   }
-  return <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
+  return (
+    <Plot
+      data={traces}
+      layout={layout}
+      config={{ displayModeBar: false }}
+      onClick={(e) => {
+        const p = e.points?.[0]
+        if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return
+        zoomToSubtree(p.y, p.x)
+      }}
+      onRelayout={(e) => {
+        if (!e) return
+        if (e['xaxis.autorange'] || e['yaxis.autorange']) {
+          setUi({ treeView: null })
+          return
+        }
+        const x0 = e['xaxis.range[0]'] as number | undefined
+        const x1 = e['xaxis.range[1]'] as number | undefined
+        if (x0 === undefined || x1 === undefined) return
+        const y0 = (e['yaxis.range[0]'] as number | undefined) ?? view?.y[0] ?? -0.9
+        const y1 = (e['yaxis.range[1]'] as number | undefined) ?? view?.y[1] ?? maxRow + 1.1
+        setUi({ treeView: { x: [x0, x1], y: [y0, y1] } })
+      }}
+    />
+  )
 }
 
 export function MergeTreePanel() {
@@ -666,9 +746,20 @@ export function MergeTreePanel() {
   const { ref, width, height } = usePanelWidth()
   const { cursor, cursorColor } = useFiltrationCursor(desc)
   const showLabels = useStore((s) => s.ui.showTreeMultiplicity)
+  const setUi = useStore((s) => s.setUi)
+  // a new tree (recompute, Delaunay/Voronoi switch) invalidates the zoom view
+  const tree = desc?.tree
+  useEffect(() => {
+    setUi({ treeView: null })
+  }, [tree, setUi])
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
+      <button className="tree-reset" title="reset view" onClick={() => setUi({ treeView: null })}>
+        <svg width="17" height="17" viewBox="0 0 24 24">
+          <path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z" fill="currentColor" />
+        </svg>
+      </button>
       {desc?.tree && (
         <MergeTreePlot
           tree={desc.tree}

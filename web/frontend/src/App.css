@@ -381,6 +381,29 @@ button:disabled {
   min-width: 180px;
 }
 
+/* semi-transparent reset-view icon in the merge tree plot's top-right */
+.plots {
+  position: relative;
+}
+
+.tree-reset {
+  position: absolute;
+  top: 18px;
+  right: 62px;
+  z-index: 5;
+  border: none;
+  background: none;
+  padding: 2px;
+  line-height: 0;
+  color: #333;
+  opacity: 0.3;
+  cursor: pointer;
+}
+
+.tree-reset:hover {
+  opacity: 0.85;
+}
+
 .popup-columns {
   display: flex;
   gap: 22px;
