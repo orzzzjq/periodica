@@ -598,6 +598,7 @@ function MergeTreePlot({
   // manual drag-zooms are kept via onRelayout
   const view = useStore((s) => s.ui.treeView)
   const stack = useStore((s) => s.ui.treeViewStack)
+  const which = useStore((s) => s.ui.complexType)
   const setUi = useStore((s) => s.setUi)
   const rowToBranch = useMemo(() => new Map(branches.map((b) => [b.row, b])), [branches])
 
@@ -616,6 +617,9 @@ function MergeTreePlot({
         sub: { row: b.row, t },
       },
       treeViewStack: [...stack, view],
+      // sync the matching filtration slider to just below the clicked node,
+      // so every slider-linked view (scene overlays, cursors) follows along
+      ...(which === 'voronoi' ? { radiusVor: t - 1e-4 } : { radius: t - 1e-4 }),
     })
   }
 
@@ -818,9 +822,21 @@ export function MergeTreePanel() {
   useEffect(() => {
     setUi({ treeView: null, treeViewStack: [] })
   }, [tree, setUi])
+  const which = useStore((s) => s.ui.complexType)
   const goBack = () => {
     if (stack.length === 0) return
-    setUi({ treeView: stack[stack.length - 1], treeViewStack: stack.slice(0, -1) })
+    const prev = stack[stack.length - 1]
+    setUi({
+      treeView: prev,
+      treeViewStack: stack.slice(0, -1),
+      // restore the slider to the previous subtree root's filtration; a
+      // full view (or an anchor-less manual view) leaves the slider alone
+      ...(prev?.sub
+        ? which === 'voronoi'
+          ? { radiusVor: prev.sub.t - 1e-4 }
+          : { radius: prev.sub.t - 1e-4 }
+        : {}),
+    })
   }
   return (
     <div className="plots" ref={ref}>
