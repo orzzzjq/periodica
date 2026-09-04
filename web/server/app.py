@@ -103,6 +103,9 @@ def compute(req: ComputeRequest):
     p = Periodica()
     p.set_geometry({'d': d, 'U': U, 'n_points': points.shape[1],
                     'points': points, 'weights': weights})
+    # set_geometry perturbs the points to break exact degeneracies; use the
+    # perturbed copy for every native call so the whole response is consistent
+    points = p.points
     try:
         p.quotient_complex('delaunay')
         p.merge_tree()

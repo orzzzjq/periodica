@@ -34,11 +34,21 @@ blue = "#7E7EFF"
 green = "#30B830"
 
 class Periodica:
+    # Stand-in for symbolic perturbation: exactly degenerate inputs (e.g.
+    # cocircular quadruples) are triangulated inconsistently across lattice
+    # copies by the 3x-domain construction, corrupting the quotient complex.
+    # Tiny noise on the canonical points resolves degeneracies, and since all
+    # copies inherit it, the resolution is translation-invariant. Seeded, so
+    # the same input always yields the same output.
+    PERTURBATION = 1e-9
+
     def set_geometry(self, INPUT):
         self.d = INPUT['d']
         self.U = INPUT['U']
         self.n_points = INPUT['n_points']
-        self.points = INPUT['points']
+        points = np.asarray(INPUT['points'], dtype=float)
+        rng = np.random.default_rng(0)
+        self.points = points + rng.normal(0.0, self.PERTURBATION, points.shape)
         if 'weights' in INPUT.keys():
             self.weights = INPUT['weights']
 
