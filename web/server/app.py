@@ -114,7 +114,11 @@ def compute(req: ComputeRequest):
 
         V = p.V
         A, b = _periodica.dirichlet_domain(V)
-        P, I, _shifts = _periodica.points_in_3x_domain(V, A, b, points)
+        # tile the CANONICAL points: full_delaunay canonicalizes internally,
+        # so this keeps I aligned with P_full's copy order (a raw-points
+        # tiling can enumerate the copies differently)
+        canonical = _periodica.canonical_points(A, b, points)
+        P, I, _shifts = _periodica.points_in_3x_domain(V, A, b, canonical)
         P_full, full_edges = _periodica.full_delaunay(U, points, weights)
     except HTTPException:
         raise
@@ -134,6 +138,10 @@ def compute(req: ComputeRequest):
             'end': end.tolist(),
             'filtration': float(p.quotient_arc_filtration[i]),
             'shift': shift.tolist(),
+            # quotient vertex indices of the endpoints (same index space as
+            # the merge tree beams), for subtree-linked filtering
+            'vStart': int(s),
+            'vEnd': int(t),
         })
 
     finite_filtrations = [a['filtration'] for a in arcs if np.isfinite(a['filtration'])]

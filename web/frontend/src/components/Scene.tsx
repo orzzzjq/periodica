@@ -174,6 +174,17 @@ function tile3xSegments(
 // filtration values only up to floating-point rounding
 const filtEps = (radius: number) => 1e-9 * Math.max(1, Math.abs(radius))
 
+// Quotient vertices of the connected component picked in the merge tree's
+// subtree view (null = no restriction). Only the filtration overlays of the
+// complex the zoomed merge tree belongs to are filtered.
+function useSubtreeVerts(complex: 'delaunay' | 'voronoi'): Set<number> | null {
+  const filter = useStore((s) => s.ui.subtreeFilter)
+  return useMemo(
+    () => (filter && filter.complex === complex ? new Set(filter.verts) : null),
+    [filter, complex],
+  )
+}
+
 // All tiled copies of all arcs, ordered by arc filtration value: the
 // sublevel set at any threshold f is a prefix of the segment list. Built
 // once per compute result — the slider never re-tiles.
@@ -249,10 +260,13 @@ function PrefixSegments({
 // power-scale filtration value is below the current threshold f_Del
 // (slider-linked), tiled across the 3x Dirichlet domain.
 function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const data = useMemo(
-    () => buildTiledSegments(results.quotientArcs, results, results.d === 2 ? 0.002 : 0),
-    [results],
-  )
+  const verts = useSubtreeVerts('delaunay')
+  const data = useMemo(() => {
+    const arcs = verts
+      ? results.quotientArcs.filter((a) => verts.has(a.vStart) && verts.has(a.vEnd))
+      : results.quotientArcs
+    return buildTiledSegments(arcs, results, results.d === 2 ? 0.002 : 0)
+  }, [results, verts])
   const opacity = useStore((s) => s.ui.filtEdgeOpacity)
   return <PrefixSegments data={data} threshold={radius} color={BLUE} opacity={opacity} />
 }
@@ -383,6 +397,10 @@ const frustumRatio = (hVirt: number, L: number) =>
 function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeResponse; radiusVor: number }) {
   const opacity = useStore((s) => s.ui.coneOpacity)
   const is2d = results.d === 2
+  // subtree view restriction: cones only along edges internal to the picked
+  // component, disks/balls only on its vertices
+  const verts = useSubtreeVerts('voronoi')
+  const edgeIn = (qv1: number, qv2: number) => !verts || (verts.has(qv1) && verts.has(qv2))
 
   // static per-copy data: tiled once per compute result
   const edges = useMemo<ConeEdge[]>(() => {
@@ -428,12 +446,13 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
         { p: e.p2, fV: e.fV2, qv: e.qv2 },
       ]
       for (const v of ends) {
+        if (verts && !verts.has(v.qv)) continue
         const key = v.p.map((c) => c.toFixed(9)).join(',')
         if (!m.has(key)) m.set(key, v)
       }
     }
     return [...m.values()]
-  }, [edges])
+  }, [edges, verts])
 
   // 3D: one oriented cone per edge side, direction static, size slider-driven
   const coneSides = useMemo<ConeSide[]>(() => {
@@ -441,6 +460,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     const up = new THREE.Vector3(0, 1, 0)
     const out: ConeSide[] = []
     for (const e of edges) {
+      if (!edgeIn(e.qv1, e.qv2)) continue
       const dir = new THREE.Vector3(...e.u)
       const denom = coneDenom(e.fE, e.fV1, e.fV2)
       out.push(
@@ -463,7 +483,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
       )
     }
     return out
-  }, [edges, is2d])
+  }, [edges, is2d, verts])
 
   const F = Number.isFinite(radiusVor) ? radiusVor : -Infinity
 
@@ -508,6 +528,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     if (!is2d) return new Float32Array(0)
     const arr: number[] = []
     for (const e of edges) {
+      if (!edgeIn(e.qv1, e.qv2)) continue
       const sides = [
         { c: e.p1, fV: e.fV1, dir: 1, qv: e.qv1 },
         { c: e.p2, fV: e.fV2, dir: -1, qv: e.qv2 },
@@ -546,7 +567,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
       }
     }
     return new Float32Array(arr)
-  }, [edges, quotientCap, F, is2d])
+  }, [edges, quotientCap, F, is2d, verts])
 
   const geometry = useMemo(() => {
     const g = new THREE.BufferGeometry()
@@ -701,11 +722,15 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
 // negative): the part of the Voronoi diagram not yet covered by the growing
 // balls, tiled across the 3x domain.
 function VoronoiFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const verts = useSubtreeVerts('voronoi')
   const data = useMemo(() => {
     const g = results.voronoiGeometry
     if (!g) return { points: [], filtration: [] } as TiledSegments
-    return buildTiledSegments(g.arcs, results, results.d === 2 ? 0.005 : 0)
-  }, [results])
+    const arcs = verts
+      ? g.arcs.filter((a) => verts.has(a.vStart) && verts.has(a.vEnd))
+      : g.arcs
+    return buildTiledSegments(arcs, results, results.d === 2 ? 0.005 : 0)
+  }, [results, verts])
   const opacity = useStore((s) => s.ui.vorEdgeOpacity)
   return <PrefixSegments data={data} threshold={radius} color={RED} opacity={opacity} />
 }
@@ -890,12 +915,16 @@ function Balls({
 // distance f_i(x) = ||x - p_i||^2 - w_i at f_Del is the union of balls of
 // radius sqrt(f_Del + w_i); point i has no ball until f_Del >= -w_i.
 function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const { positions3x, originalIndex, weights, hidden } = results.points
+  const verts = useSubtreeVerts('delaunay')
+  const { positions3x, originalIndex, weights, hidden, kept } = results.points
   const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+  // original point index -> quotient vertex index (the merge tree beam space)
+  const origToQuotient = useMemo(() => new Map(kept.map((orig, qi) => [orig, qi])), [kept])
   const items: { p: number[]; r: number }[] = []
   positions3x.forEach((p, i) => {
     const orig = originalIndex[i]
     if (hiddenSet.has(orig)) return
+    if (verts && !verts.has(origToQuotient.get(orig) ?? -1)) return
     const r2 = radius + weights[orig]
     if (r2 > 0) items.push({ p, r: Math.sqrt(r2) })
   })

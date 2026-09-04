@@ -471,7 +471,10 @@ class Periodica:
             self.weights = np.zeros(self.n_points)
         
         A, b =  _periodica.dirichlet_domain(self.V)
-        P, I, __ = _periodica.points_in_3x_domain(self.V, A, b, self.points)
+        # tile the canonical points so I aligns with full_delaunay's copy
+        # order (full_delaunay canonicalizes internally)
+        canonical = _periodica.canonical_points(A, b, self.points)
+        P, I, __ = _periodica.points_in_3x_domain(self.V, A, b, canonical)
         P, delaunay_edges = _periodica.full_delaunay(self.U, self.points, self.weights)
         self.periodic_delaunay()
 
@@ -584,7 +587,9 @@ class Periodica:
             fig = plt.figure()
         
         A, b =  _periodica.dirichlet_domain(self.V)
-        P, I, __ = _periodica.points_in_3x_domain(self.V, A, b, self.points)
+        # canonical points: keep I aligned with the full_* tiling order
+        canonical = _periodica.canonical_points(A, b, self.points)
+        P, I, __ = _periodica.points_in_3x_domain(self.V, A, b, canonical)
 
         voronoi_points, voronoi_edges = _periodica.full_voronoi(
             self.U, self.points, self.weights, use_circumcenter

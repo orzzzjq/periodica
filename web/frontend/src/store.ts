@@ -44,6 +44,10 @@ interface UiState {
   // history of views left by subtree clicks (null = full view), for the
   // back button; manual drag-zooms replace the current view without pushing
   treeViewStack: (TreeViewState | null)[]
+  // while a subtree view is active: the quotient vertices of the clicked
+  // connected component — the matching complex's filtration overlays show
+  // only edges/cones with both endpoints (and balls with their point) in it
+  subtreeFilter: { complex: 'delaunay' | 'voronoi'; verts: number[] } | null
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
 }
@@ -125,6 +129,7 @@ export const useStore = create<State>((set, get) => {
       showTreeMultiplicity: true,
       treeView: null,
       treeViewStack: [],
+      subtreeFilter: null,
       imageSize: 100,
       complexType: 'delaunay',
     },
@@ -195,3 +200,8 @@ export const useStore = create<State>((set, get) => {
 
 // initial compute on module load
 scheduleRecompute(useStore.getState as never, useStore.setState as never, 0)
+
+// debugging/testing probe
+if (typeof window !== 'undefined') {
+  ;(window as unknown as { __store: typeof useStore }).__store = useStore
+}

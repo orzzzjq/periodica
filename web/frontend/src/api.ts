@@ -24,6 +24,10 @@ export interface QuotientArc {
   end: number[]
   filtration: number
   shift: number[]
+  // quotient vertex indices of the endpoints (same index space as the
+  // Delaunay merge tree beams)
+  vStart: number
+  vEnd: number
 }
 
 export interface Bar {

@@ -484,6 +484,7 @@ function monomialText(coeff: number, exp: number): string {
 }
 
 interface TreeBranch {
+  id: number // beam index = quotient vertex index
   birth: number
   death: number | null // null = essential branch, extends to xmax
   row: number
@@ -560,6 +561,7 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
     }
     flush()
     branches.push({
+      id: i,
       birth: beam[0][0] ?? 0,
       death: death[i],
       row: rows[i],
@@ -653,6 +655,18 @@ function MergeTreePlot({
     }
     return set
   }, [branches, sub, anchor])
+
+  // publish the clicked connected component (as quotient vertex indices) so
+  // the scene restricts this complex's filtration overlays to it
+  useEffect(() => {
+    if (!sub || !anchor) {
+      if (useStore.getState().ui.subtreeFilter !== null) setUi({ subtreeFilter: null })
+      return
+    }
+    const verts = [anchor.id]
+    for (const b of branches) if (included.has(b.row)) verts.push(b.id)
+    setUi({ subtreeFilter: { complex: which, verts } })
+  }, [sub, anchor, included, branches, which, setUi])
 
   interface DrawGroup {
     lx: (number | null)[]
@@ -825,7 +839,7 @@ export function MergeTreePanel() {
   // a new tree (recompute, Delaunay/Voronoi switch) invalidates the zoom view
   const tree = desc?.tree
   useEffect(() => {
-    setUi({ treeView: null, treeViewStack: [] })
+    setUi({ treeView: null, treeViewStack: [], subtreeFilter: null })
   }, [tree, setUi])
   const which = useStore((s) => s.ui.complexType)
   const goBack = () => {
