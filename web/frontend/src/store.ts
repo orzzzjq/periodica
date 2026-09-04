@@ -30,7 +30,9 @@ interface UiState {
   vorEdgeOpacity: number // Voronoi filtration edges
   sameRange: boolean
   showTreeMultiplicity: boolean // monomial labels on the merge tree
-  treeView: { x: [number, number]; y: [number, number] } | null // null = full view
+  // null = full view; sub = the zoom anchor (time t on branch row): the
+  // part of the tree not flowing into that point is dimmed
+  treeView: { x: [number, number]; y: [number, number]; sub?: { row: number; t: number } } | null
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
 }

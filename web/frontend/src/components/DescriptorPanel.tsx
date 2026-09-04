@@ -611,36 +611,119 @@ function MergeTreePlot({
       treeView: {
         x: [Math.max(xmin, b.subtreeMinBirth - 0.08 * w), Math.min(xmax, t + 0.08 * w)],
         y: [Math.max(-0.9, b.row - padY), Math.min(maxRow + 1.1, rTop + padY)],
+        sub: { row: b.row, t },
       },
     })
   }
 
-  // one polyline trace: horizontal beam, then the vertical drop to the parent
-  const lx: (number | null)[] = []
-  const ly: (number | null)[] = []
-  for (const b of branches) {
-    lx.push(b.birth, b.death ?? xmax)
-    ly.push(b.row, b.row)
-    if (b.parentRow !== null && b.death !== null) {
-      lx.push(b.death)
-      ly.push(b.parentRow)
+  // In a subtree view anchored at time t on branch b0, everything NOT
+  // flowing into that point is dimmed to 25% opacity: branches outside b0's
+  // subtree, descendants that merge into b0 only after t, b0's own
+  // segments and events past t, and b0's merge connector.
+  const sub = view?.sub
+  const anchor = sub ? rowToBranch.get(sub.row) : undefined
+  const included = useMemo(() => {
+    const set = new Set<number>()
+    if (!sub || !anchor) return set
+    const childrenByRow = new Map<number, TreeBranch[]>()
+    for (const b of branches) {
+      if (b.parentRow === null) continue
+      const arr = childrenByRow.get(b.parentRow) ?? []
+      arr.push(b)
+      childrenByRow.set(b.parentRow, arr)
     }
-    lx.push(null)
-    ly.push(null)
+    const eps = 1e-9 * Math.max(1, Math.abs(sub.t))
+    // children of the anchor that merged by time t, with their full subtrees
+    const stack = (childrenByRow.get(anchor.row) ?? []).filter(
+      (c) => c.death !== null && c.death <= sub.t + eps,
+    )
+    while (stack.length) {
+      const b = stack.pop()!
+      set.add(b.row)
+      for (const c of childrenByRow.get(b.row) ?? []) stack.push(c)
+    }
+    return set
+  }, [branches, sub, anchor])
+
+  interface DrawGroup {
+    lx: (number | null)[]
+    ly: (number | null)[]
+    ex: number[]
+    ey: number[]
+    etext: string[]
+  }
+  const newGroup = (): DrawGroup => ({ lx: [], ly: [], ex: [], ey: [], etext: [] })
+  const main = newGroup()
+  const faded = newGroup()
+  const seg = (g: DrawGroup, x0: number, x1: number, row: number) => {
+    g.lx.push(x0, x1, null)
+    g.ly.push(row, row, null)
+  }
+  const drop = (g: DrawGroup, x: number, r0: number, r1: number) => {
+    g.lx.push(x, x, null)
+    g.ly.push(r0, r1, null)
+  }
+  const evt = (g: DrawGroup, t: number, row: number, label: string) => {
+    g.ex.push(t)
+    g.ey.push(row)
+    g.etext.push(label)
   }
 
-  const ex: number[] = []
-  const ey: number[] = []
-  const etext: string[] = []
-  for (const b of branches)
-    for (const ev of b.events) {
-      ex.push(ev.t)
-      ey.push(b.row)
-      etext.push(ev.label)
+  for (const b of branches) {
+    const end = b.death ?? xmax
+    let lineTo: DrawGroup
+    if (!sub || !anchor) {
+      lineTo = main
+    } else if (b.row === anchor.row) {
+      // the anchor branch: opaque up to t, dimmed past it (incl. connector)
+      const eps = 1e-9 * Math.max(1, Math.abs(sub.t))
+      const tcut = Math.min(sub.t, end)
+      seg(main, b.birth, tcut, b.row)
+      if (end > tcut) seg(faded, tcut, end, b.row)
+      if (b.parentRow !== null && b.death !== null) drop(faded, b.death, b.row, b.parentRow)
+      for (const ev of b.events) evt(ev.t <= sub.t + eps ? main : faded, ev.t, b.row, ev.label)
+      continue
+    } else {
+      lineTo = included.has(b.row) ? main : faded
     }
+    seg(lineTo, b.birth, end, b.row)
+    if (b.parentRow !== null && b.death !== null) drop(lineTo, b.death, b.row, b.parentRow)
+    for (const ev of b.events) evt(lineTo, ev.t, b.row, ev.label)
+  }
+
+  const groupTraces = (g: DrawGroup, opacity: number): Data[] => [
+    { x: g.lx, y: g.ly, mode: 'lines', line: { color: 'black', width: 2.5 }, opacity, hoverinfo: 'skip' },
+    {
+      x: g.ex,
+      y: g.ey,
+      mode: 'markers',
+      marker: { symbol: 'line-ns-open', size: 7, color: 'black', line: { width: 1.5 } },
+      opacity,
+      hoverinfo: 'text',
+      hovertext: g.ex.map((t, i) => `${g.etext[i]} (${t.toFixed(3)})`),
+    },
+    ...(showLabels
+      ? [
+          // top left: the label ends just left of the event, so merge
+          // connectors (vertical lines at the event x) never cover it
+          {
+            x: g.ex,
+            y: g.ey,
+            mode: 'text',
+            text: g.etext,
+            textposition: 'top left',
+            textfont: { size: 12 },
+            opacity,
+            cliponaxis: false,
+            hoverinfo: 'skip',
+          } as Data,
+        ]
+      : []),
+  ]
 
   // invisible hover targets at the merge corners (where a branch turns
-  // down into its parent)
+  // down into its parent) — over all branches, so a dimmed corner can
+  // still be clicked to zoom to its subtree
   const mx: number[] = []
   const my: number[] = []
   for (const b of branches) {
@@ -651,15 +734,8 @@ function MergeTreePlot({
   }
 
   const traces: Data[] = [
-    { x: lx, y: ly, mode: 'lines', line: { color: 'black', width: 2.5 }, hoverinfo: 'skip' },
-    {
-      x: ex,
-      y: ey,
-      mode: 'markers',
-      marker: { symbol: 'line-ns-open', size: 7, color: 'black', line: { width: 1.5 } },
-      hoverinfo: 'text',
-      hovertext: ex.map((t, i) => `${etext[i]} (${t.toFixed(3)})`),
-    },
+    ...groupTraces(faded, 0.25),
+    ...groupTraces(main, 1),
     {
       x: mx,
       y: my,
@@ -672,20 +748,6 @@ function MergeTreePlot({
       hoverlabel: { bgcolor: 'black', font: { color: 'white' } },
     },
   ]
-  if (showLabels) {
-    // top left: the label ends just left of the event, so merge connectors
-    // (vertical lines at the event x) never cover it
-    traces.push({
-      x: ex,
-      y: ey,
-      mode: 'text',
-      text: etext,
-      textposition: 'top left',
-      textfont: { size: 12 },
-      cliponaxis: false,
-      hoverinfo: 'skip',
-    })
-  }
 
   const cursorLine: NonNullable<Partial<Layout>['shapes']> =
     cursor !== null
@@ -735,7 +797,7 @@ function MergeTreePlot({
         if (x0 === undefined || x1 === undefined) return
         const y0 = (e['yaxis.range[0]'] as number | undefined) ?? view?.y[0] ?? -0.9
         const y1 = (e['yaxis.range[1]'] as number | undefined) ?? view?.y[1] ?? maxRow + 1.1
-        setUi({ treeView: { x: [x0, x1], y: [y0, y1] } })
+        setUi({ treeView: { x: [x0, x1], y: [y0, y1], sub: view?.sub } })
       }}
     />
   )
