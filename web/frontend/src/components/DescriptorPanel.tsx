@@ -602,9 +602,13 @@ function MergeTreePlot({
   const setUi = useStore((s) => s.setUi)
   const rowToBranch = useMemo(() => new Map(branches.map((b) => [b.row, b])), [branches])
 
-  const zoomToSubtree = (row: number, t: number) => {
+  const zoomToSubtree = (row: number, t: number, isMerge: boolean) => {
     const b = rowToBranch.get(row)
     if (!b) return
+    // sync the matching filtration slider so every slider-linked view (scene
+    // overlays, cursors) follows along: just before a merge corner, just
+    // after an event tick
+    const sliderT = isMerge ? t - 1e-6 : t + 1e-6
     // subtree bounding rectangle with symmetric padding, clamped to the
     // default (full-view) axis ranges
     const w = t - b.subtreeMinBirth || (xmax - xmin) * 0.01
@@ -614,12 +618,10 @@ function MergeTreePlot({
       treeView: {
         x: [Math.max(xmin, b.subtreeMinBirth - 0.08 * w), Math.min(xmax, t + 0.08 * w)],
         y: [Math.max(-0.9, b.row - padY), Math.min(maxRow + 1.1, rTop + padY)],
-        sub: { row: b.row, t },
+        sub: { row: b.row, t, sliderT },
       },
       treeViewStack: [...stack, view],
-      // sync the matching filtration slider to just below the clicked node,
-      // so every slider-linked view (scene overlays, cursors) follows along
-      ...(which === 'voronoi' ? { radiusVor: t - 1e-4 } : { radius: t - 1e-4 }),
+      ...(which === 'voronoi' ? { radiusVor: sliderT } : { radius: sliderT }),
     })
   }
 
@@ -793,7 +795,8 @@ function MergeTreePlot({
       onClick={(e) => {
         const p = e.points?.[0]
         if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return
-        zoomToSubtree(p.y, p.x)
+        // the merge-corner hover targets are the last trace
+        zoomToSubtree(p.y, p.x, p.curveNumber === traces.length - 1)
       }}
       onRelayout={(e) => {
         if (!e) return
@@ -831,12 +834,13 @@ export function MergeTreePanel() {
     setUi({
       treeView: prev,
       treeViewStack: stack.slice(0, -1),
-      // restore the slider to the previous subtree root's filtration; a
-      // full view (or an anchor-less manual view) leaves the slider alone
+      // restore the slider value synced when the previous subtree root was
+      // clicked; a full view (or an anchor-less manual view) leaves the
+      // slider alone
       ...(prev?.sub
         ? which === 'voronoi'
-          ? { radiusVor: prev.sub.t - 1e-4 }
-          : { radius: prev.sub.t - 1e-4 }
+          ? { radiusVor: prev.sub.sliderT }
+          : { radius: prev.sub.sliderT }
         : {}),
     })
   }

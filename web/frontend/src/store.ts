@@ -5,7 +5,9 @@ import { DEFAULT_PRESET, type Preset } from './presets'
 export interface TreeViewState {
   x: [number, number]
   y: [number, number]
-  sub?: { row: number; t: number }
+  // zoom anchor: time t on branch row; sliderT is the filtration slider value
+  // synced on the click (t - 1e-6 for merge corners, t + 1e-6 for events)
+  sub?: { row: number; t: number; sliderT: number }
 }
 
 export interface Inputs {
