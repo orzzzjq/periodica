@@ -712,12 +712,14 @@ function MergeTreePlot({
     ...(showLabels
       ? [
           // top left: the label ends just left of the event, so merge
-          // connectors (vertical lines at the event x) never cover it
+          // connectors (vertical lines at the event x) never cover it;
+          // the trailing thin space (not XML whitespace, so never trimmed)
+          // nudges the visible text ~2px further left
           {
             x: g.ex,
             y: g.ey,
             mode: 'text',
-            text: g.etext,
+            text: g.etext.map((s) => s + ' '),
             textposition: 'top left',
             textfont: { size: 12 },
             opacity,
