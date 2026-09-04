@@ -369,6 +369,7 @@ interface ConeSide {
   pos: [number, number, number] // base center = Voronoi vertex
   quat: THREE.Quaternion // rotates +Y onto the edge direction (3D only)
   fV: number
+  fE: number // the edge's filtration value
   denom: number // shared growth-rate denominator 2 f_E - (f_V1 + f_V2)
   L: number
   qv: number // quotient vertex index of the base center
@@ -468,6 +469,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
           pos: e.p1,
           quat: new THREE.Quaternion().setFromUnitVectors(up, dir),
           fV: e.fV1,
+          fE: e.fE,
           denom,
           L: e.L,
           qv: e.qv1,
@@ -476,6 +478,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
           pos: e.p2,
           quat: new THREE.Quaternion().setFromUnitVectors(up, dir.clone().negate()),
           fV: e.fV2,
+          fE: e.fE,
           denom,
           L: e.L,
           qv: e.qv2,
@@ -486,6 +489,11 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
   }, [edges, is2d, verts])
 
   const F = Number.isFinite(radiusVor) ? radiusVor : -Infinity
+
+  // in the subtree view a cone additionally requires its edge to have
+  // entered the filtration (f_E <= f_Vor); the full view keeps the original
+  // behavior of cones growing from birth along every edge
+  const coneShown = (fE: number) => !verts || fE <= F + filtEps(F)
 
   // Per-quotient-vertex cap on the base diameter: heights of all cones are
   // computed first — once per quotient arc, since every periodic copy of an
@@ -528,7 +536,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     if (!is2d) return new Float32Array(0)
     const arr: number[] = []
     for (const e of edges) {
-      if (!edgeIn(e.qv1, e.qv2)) continue
+      if (!edgeIn(e.qv1, e.qv2) || !coneShown(e.fE)) continue
       const sides = [
         { c: e.p1, fV: e.fV1, dir: 1, qv: e.qv1 },
         { c: e.p2, fV: e.fV2, dir: -1, qv: e.qv2 },
@@ -672,7 +680,7 @@ function VoronoiFiltrationCones({ results, radiusVor }: { results: ComputeRespon
     <>
       {coneSides.map((s, i) => {
         const grow = F - s.fV
-        if (grow <= 0) return null
+        if (grow <= 0 || !coneShown(s.fE)) return null
         const hv = coneHeight(grow, s.L, s.denom) // virtual height
         const r = baseRadius(grow, s.qv) // base radius = capped base width / 2
         if (r <= 0) return null
