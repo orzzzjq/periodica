@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import { compute, type ComputeResponse } from './api'
 import { DEFAULT_PRESET, type Preset } from './presets'
 
+export interface TreeViewState {
+  x: [number, number]
+  y: [number, number]
+  sub?: { row: number; t: number }
+}
+
 export interface Inputs {
   d: 2 | 3
   lattice: number[][]
@@ -32,7 +38,10 @@ interface UiState {
   showTreeMultiplicity: boolean // monomial labels on the merge tree
   // null = full view; sub = the zoom anchor (time t on branch row): the
   // part of the tree not flowing into that point is dimmed
-  treeView: { x: [number, number]; y: [number, number]; sub?: { row: number; t: number } } | null
+  treeView: TreeViewState | null
+  // history of views left by subtree clicks (null = full view), for the
+  // back button; manual drag-zooms replace the current view without pushing
+  treeViewStack: (TreeViewState | null)[]
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
 }
@@ -113,6 +122,7 @@ export const useStore = create<State>((set, get) => {
       sameRange: true,
       showTreeMultiplicity: true,
       treeView: null,
+      treeViewStack: [],
       imageSize: 100,
       complexType: 'delaunay',
     },

@@ -594,8 +594,10 @@ function MergeTreePlot({
   const maxRow = branches.reduce((m, b) => Math.max(m, b.row), 0)
 
   // interactive view: null = full tree; clicking a hover point zooms to the
-  // subtree rooted there; manual drag-zooms are kept via onRelayout
+  // subtree rooted there (pushing the previous view for the back button);
+  // manual drag-zooms are kept via onRelayout
   const view = useStore((s) => s.ui.treeView)
+  const stack = useStore((s) => s.ui.treeViewStack)
   const setUi = useStore((s) => s.setUi)
   const rowToBranch = useMemo(() => new Map(branches.map((b) => [b.row, b])), [branches])
 
@@ -613,6 +615,7 @@ function MergeTreePlot({
         y: [Math.max(-0.9, b.row - padY), Math.min(maxRow + 1.1, rTop + padY)],
         sub: { row: b.row, t },
       },
+      treeViewStack: [...stack, view],
     })
   }
 
@@ -809,15 +812,31 @@ export function MergeTreePanel() {
   const { cursor, cursorColor } = useFiltrationCursor(desc)
   const showLabels = useStore((s) => s.ui.showTreeMultiplicity)
   const setUi = useStore((s) => s.setUi)
+  const stack = useStore((s) => s.ui.treeViewStack)
   // a new tree (recompute, Delaunay/Voronoi switch) invalidates the zoom view
   const tree = desc?.tree
   useEffect(() => {
-    setUi({ treeView: null })
+    setUi({ treeView: null, treeViewStack: [] })
   }, [tree, setUi])
+  const goBack = () => {
+    if (stack.length === 0) return
+    setUi({ treeView: stack[stack.length - 1], treeViewStack: stack.slice(0, -1) })
+  }
   return (
     <div className="plots" ref={ref}>
       <DescError error={error} />
-      <button className="tree-reset" title="reset view" onClick={() => setUi({ treeView: null })}>
+      {stack.length > 0 && (
+        <button className="tree-back" title="back to previous view" onClick={goBack}>
+          <svg width="17" height="17" viewBox="0 0 24 24">
+            <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" fill="currentColor" />
+          </svg>
+        </button>
+      )}
+      <button
+        className="tree-reset"
+        title="reset view"
+        onClick={() => setUi({ treeView: null, treeViewStack: [] })}
+      >
         <svg width="17" height="17" viewBox="0 0 24 24">
           <path d="M12 5V1L7 6l5 5V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z" fill="currentColor" />
         </svg>
