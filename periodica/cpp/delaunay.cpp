@@ -958,12 +958,24 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         }
     }
 
-    // Get the periodic voronoi edges
+    // Get the periodic voronoi edges. A quotient edge crossing the domain
+    // boundary is found once from the copy incident to each canonical
+    // endpoint — as u->v with shift w and as v->u with shift -w, the same
+    // quotient edge — so keep only one representative per normalized key.
     vector<int> periodic_voro_edges;
+    unordered_set<vector<int>, VectorHash> edge_keys;
     for (int i = 0; i < voronoi_edges.size(); ++i) {
         auto [s,t] = voronoi_edges[i];
         if (s_I[s] == -1 || s_I[t] == -1) continue;
-        if (is_canonical[s] || is_canonical[t]) {
+        if (!is_canonical[s] && !is_canonical[t]) continue;
+        if (!is_canonical[s]) swap(s, t);
+        vector<int> key{s_I[s], s_I[t]}, rkey{s_I[t], s_I[s]};
+        for (int j = 0; j < d; ++j) {
+            key.push_back(s_shifts[t](j));
+            rkey.push_back(-s_shifts[t](j));
+        }
+        if (rkey < key) key = std::move(rkey);
+        if (edge_keys.insert(std::move(key)).second) {
             periodic_voro_edges.push_back(i);
         }
     }

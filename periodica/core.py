@@ -167,8 +167,10 @@ class Periodica:
             self.barcodes()
 
         inf = np.inf
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
+        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
+        # where every component is born with monomial exponent >= 1)
+        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
+        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
         
@@ -195,8 +197,10 @@ class Periodica:
         if ax.shape[0] != self.d + 1:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
+        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
+        # where every component is born with monomial exponent >= 1)
+        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
+        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
         # print(f'xmin {xmin} xmax {xmax}')
@@ -241,8 +245,10 @@ class Periodica:
         if ax.shape[0] != self.d + 1:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
+        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
+        # where every component is born with monomial exponent >= 1)
+        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
+        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
         xticks = np.linspace(xmin, xmax, 5)[:-1]
@@ -288,8 +294,10 @@ class Periodica:
         if ax.shape[0] != self.d + 1:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), self.bcodes))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), self.bcodes))
+        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
+        # where every component is born with monomial exponent >= 1)
+        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
+        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
         # print(f'xmin {xmin} xmax {xmax}')

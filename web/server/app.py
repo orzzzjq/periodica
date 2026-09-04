@@ -157,9 +157,10 @@ def compute(req: ComputeRequest):
         ]
 
     def encode_descriptors(barcodes, images, tree):
-        # x-range of the persistence images, matching Periodica.images()
-        xmin = min(min(bar[0] for bar in bars) for bars in barcodes)
-        xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes)
+        # x-range of the persistence images, matching Periodica.images();
+        # a dimension can have no bars at all (e.g. dim 0 of a Voronoi complex)
+        xmin = min(min(bar[0] for bar in bars) for bars in barcodes if bars)
+        xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes if bars)
         xspan = xmax - xmin
         return {
             'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
