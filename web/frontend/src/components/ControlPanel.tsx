@@ -2,23 +2,33 @@ import { useEffect, useState } from 'react'
 import { PRESETS } from '../presets'
 import { useStore } from '../store'
 
-function Num({ value, onChange, step = 0.05, min }: {
+function Num({ value, onChange, step = 0.05, min, style }: {
   value: number
   onChange: (v: number) => void
   step?: number
   min?: number
+  style?: React.CSSProperties
 }) {
+  // While focused, the field shows the raw draft so intermediate states
+  // ("", "-", "0.") survive typing; a fully cleared field commits 0. On
+  // blur the draft is dropped and the committed value is shown again.
+  const [draft, setDraft] = useState<string | null>(null)
   return (
     <input
       type="number"
       className="num"
-      value={Number.isFinite(value) ? value : ''}
+      style={style}
+      value={draft ?? (Number.isFinite(value) ? value : '')}
       step={step}
       min={min}
       onChange={(e) => {
+        setDraft(e.target.value)
         const v = e.target.valueAsNumber
         if (!Number.isNaN(v)) onChange(v)
+        // empty and NOT a half-typed number ("-", "1e"): treat as 0
+        else if (!e.target.validity.badInput) onChange(0)
       }}
+      onBlur={() => setDraft(null)}
     />
   )
 }
@@ -37,6 +47,8 @@ export default function ControlPanel() {
   const applyRandom = useStore((s) => s.applyRandom)
   const setDimension = useStore((s) => s.setDimension)
   const setCoordMode = useStore((s) => s.setCoordMode)
+  const computeNow = useStore((s) => s.computeNow)
+  const dirty = useStore((s) => s.dirty)
 
   const { d, lattice, points, weights, coordMode } = inputs
 
@@ -87,32 +99,32 @@ export default function ControlPanel() {
         {randomCfg && (
           <div className="row">
             seed{' '}
-            <input
-              type="number"
-              className="num"
-              style={{ width: 70 }}
-              step={1}
+            <Num
               value={randomCfg.seed}
-              onChange={(e) => {
-                const v = e.target.valueAsNumber
-                if (!Number.isNaN(v)) setRandomCfg({ ...randomCfg, seed: Math.round(v) })
-              }}
+              step={1}
+              style={{ width: 70 }}
+              onChange={(v) => setRandomCfg({ ...randomCfg, seed: Math.round(v) })}
             />
             points{' '}
-            <input
-              type="number"
-              className="num"
-              style={{ width: 70 }}
+            <Num
+              value={randomCfg.n}
               step={1}
               min={1}
-              value={randomCfg.n}
-              onChange={(e) => {
-                const v = e.target.valueAsNumber
-                if (!Number.isNaN(v)) setRandomCfg({ ...randomCfg, n: Math.max(1, Math.round(v)) })
-              }}
+              style={{ width: 70 }}
+              onChange={(v) => setRandomCfg({ ...randomCfg, n: Math.max(1, Math.round(v)) })}
             />
           </div>
         )}
+        <div className="row">
+          <button
+            className={dirty ? 'active' : ''}
+            style={{ width: '100%' }}
+            onClick={computeNow}
+            title="run the pipeline with the current inputs"
+          >
+            Compute
+          </button>
+        </div>
         <h2>Lattice basis (columns = vectors)</h2>
         <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
           {lattice.map((row, i) =>

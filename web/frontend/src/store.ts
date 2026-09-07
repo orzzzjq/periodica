@@ -61,8 +61,11 @@ interface State {
   results: ComputeResponse | null
   status: 'idle' | 'loading' | 'error'
   error: string | null
+  // inputs changed since the last compute (highlights the Compute button)
+  dirty: boolean
   ui: UiState
   setUi: (partial: Partial<UiState>) => void
+  computeNow: () => void
   setLatticeEntry: (i: number, j: number, value: number) => void
   setPointCoord: (row: number, j: number, value: number) => void
   setWeight: (row: number, value: number) => void
@@ -153,9 +156,10 @@ function scheduleRecompute(get: () => State, set: (partial: Partial<State>) => v
 }
 
 export const useStore = create<State>((set, get) => {
-  const update = (mutate: (inputs: Inputs) => Inputs, delayMs = 300) => {
-    set({ inputs: mutate(get().inputs) })
-    scheduleRecompute(get, set, delayMs)
+  // input edits only update the fields and mark them dirty; the backend
+  // runs when the Compute button calls computeNow()
+  const update = (mutate: (inputs: Inputs) => Inputs) => {
+    set({ inputs: mutate(get().inputs), dirty: true })
   }
 
   return {
@@ -169,6 +173,7 @@ export const useStore = create<State>((set, get) => {
     results: null,
     status: 'idle',
     error: null,
+    dirty: false,
     ui: {
       radius: 0,
       // -Infinity = "at the slider minimum" (the actual minimum depends on
@@ -197,6 +202,11 @@ export const useStore = create<State>((set, get) => {
       subtreeFilter: null,
       imageSize: 100,
       complexType: 'delaunay',
+    },
+
+    computeNow: () => {
+      set({ dirty: false })
+      scheduleRecompute(get, set, 0)
     },
 
     setUi: (partial) => {
@@ -233,14 +243,14 @@ export const useStore = create<State>((set, get) => {
         ...inp,
         points: [...inp.points, new Array(inp.d).fill(0.5)],
         weights: [...inp.weights, 0],
-      }), 0),
+      })),
 
     removePoint: (row) =>
       update((inp) => ({
         ...inp,
         points: inp.points.filter((_, i) => i !== row),
         weights: inp.weights.filter((_, i) => i !== row),
-      }), 0),
+      })),
 
     applyPreset: (preset) =>
       update((inp) => ({
@@ -249,14 +259,14 @@ export const useStore = create<State>((set, get) => {
         lattice: preset.lattice.map((r) => [...r]),
         points: preset.points.map((r) => [...r]),
         weights: [...preset.weights],
-      }), 0),
+      })),
 
     applyRandom: (seed, nPoints) =>
       update((inp) => {
         const n = Math.max(1, Math.min(100, Math.round(nPoints) || 1))
         // random points are fractional by construction
         return { ...inp, ...randomGeometry(inp.d, seed, n), coordMode: 'fractional' as const }
-      }, 0),
+      }),
 
     setDimension: (d) => {
       if (d === get().inputs.d) return
@@ -267,13 +277,13 @@ export const useStore = create<State>((set, get) => {
         lattice: identity,
         points: [new Array(d).fill(0.5)],
         weights: [0],
-      }), 0)
+      }))
     },
 
     setCoordMode: (mode) => {
       if (mode === get().inputs.coordMode) return
       // the entered numbers are kept and reinterpreted in the new mode
-      update((inp) => ({ ...inp, coordMode: mode }), 0)
+      update((inp) => ({ ...inp, coordMode: mode }))
     },
   }
 })
