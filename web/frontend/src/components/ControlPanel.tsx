@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { PRESETS } from '../presets'
 import { useStore } from '../store'
 
@@ -33,9 +34,18 @@ export default function ControlPanel() {
   const addPoint = useStore((s) => s.addPoint)
   const removePoint = useStore((s) => s.removePoint)
   const applyPreset = useStore((s) => s.applyPreset)
+  const applyRandom = useStore((s) => s.applyRandom)
   const setDimension = useStore((s) => s.setDimension)
+  const setCoordMode = useStore((s) => s.setCoordMode)
 
-  const { d, lattice, points, weights } = inputs
+  const { d, lattice, points, weights, coordMode } = inputs
+
+  // Random preset config; null = a regular preset (or manual input) is active.
+  // Any change of seed / point count / dimension regenerates deterministically.
+  const [randomCfg, setRandomCfg] = useState<{ seed: number; n: number } | null>(null)
+  useEffect(() => {
+    if (randomCfg) applyRandom(randomCfg.seed, randomCfg.n)
+  }, [randomCfg, d, applyRandom])
   const coordLabels = ['x', 'y', 'z'].slice(0, d)
 
   return (
@@ -46,6 +56,11 @@ export default function ControlPanel() {
           <select
             defaultValue=""
             onChange={(e) => {
+              if (e.target.value === '__random') {
+                setRandomCfg((cfg) => cfg ?? { seed: 1, n: 2 })
+                return
+              }
+              setRandomCfg(null)
               const p = PRESETS.find((p) => p.name === e.target.value)
               if (p) applyPreset(p)
             }}
@@ -58,6 +73,7 @@ export default function ControlPanel() {
                 {p.name}
               </option>
             ))}
+            <option value="__random">Random</option>
           </select>
         </label>
         <div className="row">
@@ -68,6 +84,35 @@ export default function ControlPanel() {
       </section>
 
       <section>
+        {randomCfg && (
+          <div className="row">
+            seed{' '}
+            <input
+              type="number"
+              className="num"
+              style={{ width: 70 }}
+              step={1}
+              value={randomCfg.seed}
+              onChange={(e) => {
+                const v = e.target.valueAsNumber
+                if (!Number.isNaN(v)) setRandomCfg({ ...randomCfg, seed: Math.round(v) })
+              }}
+            />
+            points{' '}
+            <input
+              type="number"
+              className="num"
+              style={{ width: 70 }}
+              step={1}
+              min={1}
+              value={randomCfg.n}
+              onChange={(e) => {
+                const v = e.target.valueAsNumber
+                if (!Number.isNaN(v)) setRandomCfg({ ...randomCfg, n: Math.max(1, Math.round(v)) })
+              }}
+            />
+          </div>
+        )}
         <h2>Lattice basis (columns = vectors)</h2>
         <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
           {lattice.map((row, i) =>
@@ -80,6 +125,22 @@ export default function ControlPanel() {
 
       <section>
         <h2>Points &amp; weights</h2>
+        <div className="row">
+          <button
+            className={coordMode === 'fractional' ? 'active' : ''}
+            onClick={() => setCoordMode('fractional')}
+            title="coordinates are coefficients of the lattice basis vectors"
+          >
+            fractional
+          </button>
+          <button
+            className={coordMode === 'real' ? 'active' : ''}
+            onClick={() => setCoordMode('real')}
+            title="coordinates are Cartesian, used as-is"
+          >
+            real
+          </button>
+        </div>
         <table className="points">
           <thead>
             <tr>

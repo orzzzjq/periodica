@@ -15,6 +15,10 @@ export interface Inputs {
   lattice: number[][]
   points: number[][]
   weights: number[]
+  // how the point coordinates are interpreted: 'fractional' = coefficients
+  // of the lattice basis vectors (converted to real before the API call),
+  // 'real' = Cartesian coordinates as-is
+  coordMode: 'fractional' | 'real'
 }
 
 interface UiState {
@@ -65,11 +69,65 @@ interface State {
   addPoint: () => void
   removePoint: (row: number) => void
   applyPreset: (preset: Preset) => void
+  applyRandom: (seed: number, nPoints: number) => void
   setDimension: (d: 2 | 3) => void
+  setCoordMode: (mode: 'fractional' | 'real') => void
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let requestSeq = 0
+
+// deterministic 32-bit PRNG (mulberry32) for the reproducible Random preset
+function mulberry32(seed: number) {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+// Random geometry: lattice entries uniform in [-1, 1] (redrawn until the
+// basis is not near-singular), fractional points uniform in [0, 1], all
+// rounded to 3 decimals for readable inputs. The lattice is drawn before
+// the points, so with a fixed seed a larger point count keeps the lattice
+// and the existing points and only appends new ones.
+function randomGeometry(d: 2 | 3, seed: number, nPoints: number) {
+  const rng = mulberry32(seed)
+  const r3 = (x: number) => Math.round(x * 1000) / 1000
+  const det = (m: number[][]) =>
+    d === 2
+      ? m[0][0] * m[1][1] - m[0][1] * m[1][0]
+      : m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+        m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+        m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+  let lattice: number[][] = Array.from({ length: d }, (_, i) =>
+    Array.from({ length: d }, (_, j) => (i === j ? 1 : 0)),
+  )
+  for (let tries = 0; tries < 100; tries++) {
+    const cand = Array.from({ length: d }, () =>
+      Array.from({ length: d }, () => r3(rng() * 2 - 1)),
+    )
+    if (Math.abs(det(cand)) > (d === 2 ? 0.3 : 0.15)) {
+      lattice = cand
+      break
+    }
+  }
+  const points = Array.from({ length: nPoints }, () =>
+    Array.from({ length: d }, () => r3(rng())),
+  )
+  return { lattice, points, weights: new Array(nPoints).fill(0) }
+}
+
+// fractional -> real: point coordinates are coefficients of the basis
+// vectors (lattice columns are the vectors), real_i = sum_j U[i][j] * p_j
+function toRealPoints(inputs: Inputs): number[][] {
+  if (inputs.coordMode !== 'fractional') return inputs.points
+  return inputs.points.map((p) =>
+    inputs.lattice.map((row) => row.reduce((s, u, j) => s + u * (p[j] ?? 0), 0)),
+  )
+}
 
 function scheduleRecompute(get: () => State, set: (partial: Partial<State>) => void, delayMs = 300) {
   clearTimeout(debounceTimer)
@@ -78,7 +136,13 @@ function scheduleRecompute(get: () => State, set: (partial: Partial<State>) => v
     const seq = ++requestSeq
     set({ status: 'loading' })
     try {
-      const results = await compute({ ...inputs, imageSize: ui.imageSize })
+      const results = await compute({
+        d: inputs.d,
+        lattice: inputs.lattice,
+        points: toRealPoints(inputs),
+        weights: inputs.weights,
+        imageSize: ui.imageSize,
+      })
       if (seq !== requestSeq) return // a newer request superseded this one
       set({ results, status: 'idle', error: null })
     } catch (e) {
@@ -100,6 +164,7 @@ export const useStore = create<State>((set, get) => {
       lattice: DEFAULT_PRESET.lattice.map((r) => [...r]),
       points: DEFAULT_PRESET.points.map((r) => [...r]),
       weights: [...DEFAULT_PRESET.weights],
+      coordMode: 'fractional',
     },
     results: null,
     status: 'idle',
@@ -178,22 +243,37 @@ export const useStore = create<State>((set, get) => {
       }), 0),
 
     applyPreset: (preset) =>
-      update(() => ({
+      update((inp) => ({
+        ...inp,
         d: preset.d,
         lattice: preset.lattice.map((r) => [...r]),
         points: preset.points.map((r) => [...r]),
         weights: [...preset.weights],
       }), 0),
 
+    applyRandom: (seed, nPoints) =>
+      update((inp) => {
+        const n = Math.max(1, Math.min(100, Math.round(nPoints) || 1))
+        // random points are fractional by construction
+        return { ...inp, ...randomGeometry(inp.d, seed, n), coordMode: 'fractional' as const }
+      }, 0),
+
     setDimension: (d) => {
       if (d === get().inputs.d) return
       const identity = d === 2 ? [[1, 0], [0, 1]] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-      update(() => ({
+      update((inp) => ({
+        ...inp,
         d,
         lattice: identity,
         points: [new Array(d).fill(0.5)],
         weights: [0],
       }), 0)
+    },
+
+    setCoordMode: (mode) => {
+      if (mode === get().inputs.coordMode) return
+      // the entered numbers are kept and reinterpreted in the new mode
+      update((inp) => ({ ...inp, coordMode: mode }), 0)
     },
   }
 })

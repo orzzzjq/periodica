@@ -956,7 +956,8 @@ export default function Scene() {
   const is2d = results.d === 2
 
   return (
-    <Canvas key={`${results.d}`} style={{ background: '#ffffff' }} gl={{ stencil: true }}>
+    <Canvas key={`${results.d}`} style={{ background: '#ffffff' }} gl={{ stencil: true }} frameloop="demand">
+      <InvalidateOnChange />
       {is2d ? (
         <>
           <OrthographicCamera makeDefault position={[0, 0, 10]} zoom={220 / extent} />
@@ -1071,11 +1072,33 @@ export function DisplayOptions() {
   )
 }
 
+// frameloop="demand": the scene repaints only when invalidated. The r3f
+// reconciler invalidates on declarative prop changes and the drei controls
+// invalidate on camera interaction, but several components mutate three.js
+// state imperatively (material opacity, instanceCount via useFrame). Any
+// store change that can affect the scene requests one frame here.
+function InvalidateOnChange() {
+  const invalidate = useThree((s) => s.invalidate)
+  const gl = useThree((s) => s.gl)
+  const ui = useStore((s) => s.ui)
+  const results = useStore((s) => s.results)
+  useEffect(() => {
+    invalidate()
+  }, [ui, results, invalidate])
+  // debugging/testing probe (frame counter lives in gl.info.render.frame)
+  useEffect(() => {
+    ;(window as unknown as { __glInfo: typeof gl.info }).__glInfo = gl.info
+  }, [gl])
+  return null
+}
+
 function CameraSetup({ extent }: { extent: number }) {
   const camera = useThree((s) => s.camera)
+  const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
     camera.position.set(extent * 1.5, extent * 1.2, extent * 1.8)
     camera.lookAt(0, 0, 0)
-  }, [camera, extent])
+    invalidate()
+  }, [camera, extent, invalidate])
   return null
 }
