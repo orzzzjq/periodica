@@ -69,7 +69,7 @@ export default function ControlPanel() {
             defaultValue=""
             onChange={(e) => {
               if (e.target.value === '__random') {
-                setRandomCfg((cfg) => cfg ?? { seed: 1, n: 2 })
+                setRandomCfg((cfg) => cfg ?? { seed: 0, n: 2 })
                 return
               }
               setRandomCfg(null)
@@ -98,14 +98,14 @@ export default function ControlPanel() {
       <section>
         {randomCfg && (
           <div className="row">
-            seed{' '}
+            Seed{' '}
             <Num
               value={randomCfg.seed}
               step={1}
               style={{ width: 70 }}
               onChange={(v) => setRandomCfg({ ...randomCfg, seed: Math.round(v) })}
             />
-            points{' '}
+            Points{' '}
             <Num
               value={randomCfg.n}
               step={1}
@@ -124,6 +124,10 @@ export default function ControlPanel() {
           >
             Compute
           </button>
+        </div>
+        <div className="status">
+          {status === 'loading' && <div className="loading">computing…</div>}
+          {error && <div className="error">{error}</div>}
         </div>
         <h2>Lattice basis (columns = vectors)</h2>
         <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
@@ -187,8 +191,6 @@ export default function ControlPanel() {
       </section>
 
       <section className="status">
-        {status === 'loading' && <div className="loading">computing…</div>}
-        {error && <div className="error">{error}</div>}
         {results && results.points.hidden.length > 0 && (
           <div className="warning">
             hidden point{results.points.hidden.length > 1 ? 's' : ''} (dominated by weights):{' '}
