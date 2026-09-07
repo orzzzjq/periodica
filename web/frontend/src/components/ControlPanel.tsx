@@ -93,9 +93,6 @@ export default function ControlPanel() {
           <button className={d === 2 ? 'active' : ''} onClick={() => setDimension(2)}>2D</button>
           <button className={d === 3 ? 'active' : ''} onClick={() => setDimension(3)}>3D</button>
         </div>
-      </section>
-
-      <section>
         {randomCfg && (
           <div className="row">
             Seed{' '}
@@ -115,6 +112,9 @@ export default function ControlPanel() {
             />
           </div>
         )}
+      </section>
+
+      <section>
         <div className="row">
           <button
             className={dirty ? 'active' : ''}
@@ -129,6 +129,9 @@ export default function ControlPanel() {
           {status === 'loading' && <div className="loading">computing…</div>}
           {error && <div className="error">{error}</div>}
         </div>
+      </section>
+
+      <section>
         <h2>Lattice basis (columns = vectors)</h2>
         <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
           {lattice.map((row, i) =>
