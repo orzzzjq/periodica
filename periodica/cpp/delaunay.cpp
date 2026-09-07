@@ -1046,20 +1046,14 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
 
     Gudhi::Simplex_tree<> delaunay_complex = DelaunayComplex(working_points, working_weights);
 
-    // Get d-dimensional simplices
-    unordered_map<int64_t, int> simplex_id_map;
+    // Get d-dimensional simplices. Cofaces of the (d-1)-faces are collected
+    // in one pass over the d-simplices: a per-face GUDHI cofaces query
+    // traverses the simplex tree and is quadratic overall (minutes for a few
+    // hundred points in 3D).
+    unordered_map<vector<int>, CofaceIds, VectorHash> face_to_cofaces;
     vector<vector<int>> simplex_vertices;
     vector<Eigen::VectorXd> voronoi_points;
     vector<bool> simplex_in_1x_domain;
-    
-    auto simplexKey = [](const vector<int>& vertices) {
-        int64_t key = 0;
-        for (size_t i = 0; i < vertices.size(); ++i) {
-            key |= vertices[i];
-            key <<= 20;
-        }
-        return key;
-    };
 
     for (auto simplex : delaunay_complex.skeleton_simplex_range(d)) {
         if (delaunay_complex.dimension(simplex) != d) continue;
@@ -1089,31 +1083,29 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
         }
 
         int id = static_cast<int>(simplex_vertices.size());
-        simplex_id_map.emplace(simplexKey(vertices), id);
+        // register the d+1 facets: `vertices` is sorted, so skipping one
+        // entry already yields a sorted face key
+        for (size_t skip = 0; skip < vertices.size(); ++skip) {
+            vector<int> face;
+            face.reserve(vertices.size() - 1);
+            for (size_t k = 0; k < vertices.size(); ++k) {
+                if (k != skip) face.push_back(vertices[k]);
+            }
+            face_to_cofaces[std::move(face)].add(id);
+        }
         simplex_vertices.push_back(std::move(vertices));
         voronoi_points.push_back(std::move(center));
         simplex_in_1x_domain.push_back(in_1x_domain);
     }
 
-    // Voronoi edges connect adjacent d-simplices that share a (d-1)-face.
+    // Voronoi edges connect adjacent d-simplices that share a (d-1)-face;
+    // interior faces have exactly two cofaces (triangulation-boundary
+    // faces have one).
     vector<pair<int,int>> voronoi_edges;
-    for (auto simplex : delaunay_complex.skeleton_simplex_range(d-1)) {
-        if (delaunay_complex.dimension(simplex) != d-1) continue;
-
-        vector<int> cofaces;
-        for (auto coface : delaunay_complex.cofaces_simplex_range(simplex, 1)) {
-            // coface is a d-simplex handle
-            std::vector<int> verts;
-            for (auto v : delaunay_complex.simplex_vertex_range(coface)) {
-                verts.push_back(static_cast<int>(v));
-            }
-            sort(verts.begin(), verts.end());
-            cofaces.push_back(simplex_id_map[simplexKey(verts)]);
-        }
-
-        if (cofaces.size() == 2) {
-            // The simplex has two cofaces
-            voronoi_edges.push_back({cofaces[0], cofaces[1]});
+    voronoi_edges.reserve(face_to_cofaces.size());
+    for (const auto& [face, cofaces] : face_to_cofaces) {
+        if (cofaces.count == 2) {
+            voronoi_edges.push_back({cofaces.ids[0], cofaces.ids[1]});
         }
     }
 
