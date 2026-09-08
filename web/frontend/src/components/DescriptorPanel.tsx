@@ -3,9 +3,18 @@ import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout } from 'plotly.js'
 import createPlotlyComponent from 'react-plotly.js/factory'
 import type { Bar, Descriptors, ImagesData, TreeEvent } from '../api'
+import { registerPlot, type SaveItem } from '../capture'
 import { useStore } from '../store'
 
 const Plot = createPlotlyComponent(Plotly)
+
+// register a plot's graph div for image export; index = visual order
+// within its panel (top plot first)
+const capture = (panel: SaveItem, pos: number) => {
+  const register = (_: unknown, gd: Readonly<HTMLElement>) =>
+    registerPlot(panel, pos, gd as HTMLElement)
+  return { onInitialized: register, onUpdate: register }
+}
 
 // shadow monomial labels by exponent, matching core.py
 const LABELS = ['·R⁰', '·2R¹', '·πR²', '·(4π/3)R³']
@@ -190,7 +199,7 @@ function BarcodePlots({
   const dims = [...barcodes.keys()].reverse()
   return (
     <>
-      {dims.map((i) => {
+      {dims.map((i, pos) => {
         const bars = barcodes[i]
         const traces: Data[] = bars.map((b, j) => ({
           x: [b.birth, b.death ?? xmax],
@@ -224,7 +233,9 @@ function BarcodePlots({
         const layout = baseLayout(i, xmin, xmax, width)
         layout.yaxis = { visible: false, range: [-bars.length, 1] }
         layout.shapes = [...(layout.shapes ?? []), ...radiusLine]
-        return <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} />
+        return (
+          <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} {...capture('barcode', pos)} />
+        )
       })}
     </>
   )
@@ -245,7 +256,7 @@ function DiagramPlots({
   const dims = [...barcodes.keys()].reverse()
   return (
     <>
-      {dims.map((i) => {
+      {dims.map((i, pos) => {
         const bars = barcodes[i]
         const finite = bars.filter((b) => b.death !== null)
         const infinite = bars.filter((b) => b.death === null)
@@ -288,7 +299,7 @@ function DiagramPlots({
         layout.shapes = [...(layout.shapes ?? []), ...cursorSegments(cursor, cursorColor, xmin, xmax)]
         return (
           <div key={i} className="square-plot">
-            <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
+            <Plot data={traces} layout={layout} config={{ displayModeBar: false }} {...capture('diagram', pos)} />
           </div>
         )
       })}
@@ -322,7 +333,7 @@ function ImagePlots({
   const dims = [...data.keys()].reverse()
   return (
     <>
-      {dims.map((i) => {
+      {dims.map((i, pos) => {
         let range = globalRange
         if (!sameRange) {
           range = 0
@@ -359,7 +370,7 @@ function ImagePlots({
         layout.shapes = [...(layout.shapes ?? []), ...cursorSegments(cursor, cursorColor, xmin, xmax)]
         return (
           <div key={i} className="square-plot">
-            <Plot data={traces} layout={layout} config={{ displayModeBar: false }} />
+            <Plot data={traces} layout={layout} config={{ displayModeBar: false }} {...capture('image', pos)} />
           </div>
         )
       })}
@@ -809,6 +820,7 @@ function MergeTreePlot({
       data={traces}
       layout={layout}
       config={{ displayModeBar: false }}
+      {...capture('tree', 0)}
       onClick={(e) => {
         const p = e.points?.[0]
         if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') return

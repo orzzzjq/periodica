@@ -9,6 +9,7 @@ import {
 } from './components/DescriptorPanel'
 import PanelHost from './components/PanelSystem'
 import RadiusSlider from './components/RadiusSlider'
+import SaveButton from './components/SaveDialog'
 import Scene, { DisplayOptions } from './components/Scene'
 import { useStore } from './store'
 import './App.css'
@@ -55,5 +56,5 @@ const HEADER_EXTRAS = {
 }
 
 export default function App() {
-  return <PanelHost contents={CONTENTS} headerExtras={HEADER_EXTRAS} appBarExtra={<ComplexToggle />} />
+  return <PanelHost contents={CONTENTS} headerExtras={HEADER_EXTRAS} appBarExtra={<><ComplexToggle /><SaveButton /></>} />
 }

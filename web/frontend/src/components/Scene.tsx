@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { Line2 } from 'three-stdlib'
 import { inDirichletDomain, type ComputeResponse, type Polytope2D, type Polytope3D } from '../api'
+import { captureRegistry } from '../capture'
 import { useStore } from '../store'
 
 const GREEN = '#30b830'
@@ -956,7 +957,15 @@ export default function Scene() {
   const is2d = results.d === 2
 
   return (
-    <Canvas key={`${results.d}`} style={{ background: '#ffffff' }} gl={{ stencil: true }} frameloop="demand">
+    <Canvas
+      key={`${results.d}`}
+      style={{ background: '#ffffff' }}
+      gl={{ stencil: true }}
+      frameloop="demand"
+      onCreated={(state) => {
+        captureRegistry.r3f = state
+      }}
+    >
       <InvalidateOnChange />
       {is2d ? (
         <>

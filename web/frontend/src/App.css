@@ -454,3 +454,59 @@ button:disabled {
   font-size: 12px;
   padding: 8px;
 }
+
+/* ---- save dialog ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100001; /* above the app bar */
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.save-dialog {
+  background: #fff;
+  border: 1px solid #c4c4c4;
+  border-radius: 6px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  padding: 12px 18px 14px;
+  min-width: 300px;
+  font-size: 13px;
+  /* the dialog mounts inside the app bar, which sets a light text color */
+  color: #000;
+}
+
+.save-dialog h2 {
+  font-size: 13px;
+  margin: 2px 0 8px;
+}
+
+.save-dialog .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.save-dialog input[type='text'] {
+  flex: 1;
+}
+
+.save-hint {
+  color: #666;
+  font-size: 11px;
+  margin: 6px 0 0;
+}
+
+.save-error {
+  color: #b00020;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+
+.save-actions {
+  margin-top: 10px;
+  justify-content: flex-end;
+}
