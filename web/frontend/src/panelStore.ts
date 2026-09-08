@@ -100,15 +100,17 @@ function defaultLayout(): Record<string, PanelGroup> {
     { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode'], active: 'barcode' },
     { id: newId(), x: at(diagramW), y: gap, w: diagramW, h: descH, z: 4, minimized: false, tabs: ['diagram'], active: 'diagram' },
     { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 5, minimized: false, tabs: ['image'], active: 'image' },
-    // merge tree: its own window, minimized into the app bar by default
+    // merge tree: below Input/Visualization — the standard gap under the
+    // Visualization window, right edge aligned with its right edge, left
+    // edge at the middle of the Input panel
     {
       id: newId(),
-      x: inputW + 2 * gap,
-      y: gap + 48,
-      w: Math.max(sceneW + barcodeW, 640),
+      x: gap + inputW / 2,
+      y: gap + mainH + gap,
+      w: gap + inputW / 2 + sceneW,
       h: 340,
       z: 6,
-      minimized: true,
+      minimized: false,
       tabs: ['tree'],
       active: 'tree',
     },
