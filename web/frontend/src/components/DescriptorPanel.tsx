@@ -792,12 +792,15 @@ function MergeTreePlot({
   // fill the panel height (so top/bottom whitespace stays symmetric), but
   // never squeeze rows below readability
   const plotHeight = Math.max(height, 42 + (maxRow + 1) * 20 + 16)
+  // the y axis is rendered reversed (root / infinite branch on top, subtrees
+  // stacking downward); view state keeps y ranges as [min, max] regardless
+  const yr = view?.y ?? [-0.9, maxRow + 1.1]
   const layout: Partial<Layout> = {
     width,
     height: plotHeight,
-    margin: { l: 46, r: 46, t: 8, b: 34 },
-    xaxis: { range: view?.x ?? [xmin, xmax], zeroline: false, ...TICKS },
-    yaxis: { visible: false, range: view?.y ?? [-0.9, maxRow + 1.1] },
+    margin: { l: 46, r: 46, t: 34, b: 8 },
+    xaxis: { range: view?.x ?? [xmin, xmax], zeroline: false, side: 'top', ...TICKS },
+    yaxis: { visible: false, range: [yr[1], yr[0]] },
     showlegend: false,
     shapes: [...(BORDER ?? []), ...cursorLine],
   }
@@ -821,9 +824,12 @@ function MergeTreePlot({
         const x0 = e['xaxis.range[0]'] as number | undefined
         const x1 = e['xaxis.range[1]'] as number | undefined
         if (x0 === undefined || x1 === undefined) return
-        const y0 = (e['yaxis.range[0]'] as number | undefined) ?? view?.y[0] ?? -0.9
-        const y1 = (e['yaxis.range[1]'] as number | undefined) ?? view?.y[1] ?? maxRow + 1.1
-        setUi({ treeView: { x: [x0, x1], y: [y0, y1], sub: view?.sub } })
+        // the rendered y axis is reversed: normalize back to [min, max]
+        const ya = (e['yaxis.range[0]'] as number | undefined) ?? view?.y[1] ?? maxRow + 1.1
+        const yb = (e['yaxis.range[1]'] as number | undefined) ?? view?.y[0] ?? -0.9
+        setUi({
+          treeView: { x: [x0, x1], y: [Math.min(ya, yb), Math.max(ya, yb)], sub: view?.sub },
+        })
       }}
     />
   )
