@@ -4,6 +4,7 @@
 // contents live on stable holder divs that are DETACHED from the document
 // while their window is minimized, so element references are the only way
 // to reach them reliably.
+import { zipSync } from 'fflate'
 import Plotly from 'plotly.js-dist-min'
 import type * as THREE from 'three'
 import { useStore } from './store'
@@ -136,9 +137,6 @@ interface PickerWindow {
     suggestedName: string
     types: { description: string; accept: Record<string, string[]> }[]
   }) => Promise<FileHandleLike>
-  showDirectoryPicker?: (opts: { mode: string }) => Promise<{
-    getFileHandle(name: string, opts: { create: boolean }): Promise<FileHandleLike>
-  }>
 }
 
 function anchorDownload(name: string, blob: Blob) {
@@ -152,39 +150,40 @@ function anchorDownload(name: string, blob: Blob) {
 
 const isAbort = (e: unknown) => e instanceof DOMException && e.name === 'AbortError'
 
+/** Pack the files into one uncompressed zip (the images are already
+ * compressed) whose entries carry the plain per-item names. */
+export async function zipFiles(
+  files: { name: string; blob: Blob }[],
+  zipName: string,
+): Promise<{ name: string; blob: Blob }> {
+  const entries: Record<string, Uint8Array> = {}
+  for (const f of files) entries[f.name] = new Uint8Array(await f.blob.arrayBuffer())
+  const blob = new Blob([zipSync(entries, { level: 0 })], { type: 'application/zip' })
+  return { name: zipName, blob }
+}
+
 /**
- * Save the files with a native picker where available (Chromium: save-as
- * dialog for one file, directory picker for several), falling back to plain
- * browser downloads elsewhere. Returns false if the user cancelled.
+ * Save one file with the native save-as picker where available (Chromium),
+ * falling back to a plain browser download elsewhere. Returns false if the
+ * user cancelled the picker.
  */
-export async function saveFiles(files: { name: string; blob: Blob }[]): Promise<boolean> {
+export async function saveFile(name: string, blob: Blob): Promise<boolean> {
   const w = window as unknown as PickerWindow
   try {
-    if (files.length === 1 && w.showSaveFilePicker) {
-      const { name, blob } = files[0]
+    if (w.showSaveFilePicker) {
       const handle = await w.showSaveFilePicker({
         suggestedName: name,
-        types: [{ description: 'Image', accept: { [blob.type]: ['.' + name.split('.').pop()!] } }],
+        types: [{ description: 'File', accept: { [blob.type]: ['.' + name.split('.').pop()!] } }],
       })
       const out = await handle.createWritable()
       await out.write(blob)
       await out.close()
       return true
     }
-    if (files.length > 1 && w.showDirectoryPicker) {
-      const dir = await w.showDirectoryPicker({ mode: 'readwrite' })
-      for (const { name, blob } of files) {
-        const handle = await dir.getFileHandle(name, { create: true })
-        const out = await handle.createWritable()
-        await out.write(blob)
-        await out.close()
-      }
-      return true
-    }
   } catch (e) {
     if (isAbort(e)) return false
     throw e
   }
-  for (const { name, blob } of files) anchorDownload(name, blob)
+  anchorDownload(name, blob)
   return true
 }

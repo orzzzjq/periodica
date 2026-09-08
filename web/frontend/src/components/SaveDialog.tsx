@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { captureItem, EXT, saveFiles, type SaveFormat, type SaveItem } from '../capture'
+import { captureItem, EXT, saveFile, zipFiles, type SaveFormat, type SaveItem } from '../capture'
 
 const ITEMS: { key: SaveItem; label: string; suffix: string }[] = [
   { key: 'visualization', label: 'Visualization', suffix: 'visualization' },
@@ -38,16 +38,19 @@ export default function SaveButton() {
       for (const item of items) {
         try {
           const blob = await captureItem(item.key, format, scale)
-          const fname =
-            items.length === 1 ? `${base}.${EXT[format]}` : `${base}-${item.suffix}.${EXT[format]}`
-          files.push({ name: fname, blob })
+          files.push({ name: `${item.suffix}.${EXT[format]}`, blob })
         } catch {
           failed.push(item.label)
         }
       }
       if (failed.length > 0) setError(`could not capture: ${failed.join(', ')}`)
       if (files.length > 0) {
-        const done = await saveFiles(files)
+        // one item saves the image directly; several are packed into a zip
+        const out =
+          items.length === 1
+            ? { name: `${base}.${EXT[format]}`, blob: files[0].blob }
+            : await zipFiles(files, `${base}.zip`)
+        const done = await saveFile(out.name, out.blob)
         if (done && failed.length === 0) setOpen(false)
       }
     } catch (e) {
@@ -104,7 +107,7 @@ export default function SaveButton() {
             </div>
             {selected.size > 1 && (
               <div className="save-hint">
-                files are suffixed: {name.trim() || 'periodica'}-visualization.{EXT[format]}, …
+                packed into {name.trim() || 'periodica'}.zip: visualization.{EXT[format]}, …
               </div>
             )}
             {error && <div className="save-error">{error}</div>}
