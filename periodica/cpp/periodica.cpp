@@ -19,8 +19,12 @@ PYBIND11_MODULE(_periodica, m) {
    m.def("euclidean_mst", &DELAUNAY::EuclideanMST, 
         "Compute 2D & 3D Euclidean minimum spanning trees",
         py::arg("points"));
-   m.def("reduced_basis", &DELAUNAY::reducedBasis, 
+   m.def("reduced_basis", &DELAUNAY::reducedBasis,
         "Reduce Lattice basis into reduced basis",
+        py::arg("U"));
+   m.def("reduced_basis_coeffs", &DELAUNAY::reducedBasisCoeffs,
+        "Reduce lattice basis into an obtuse superbase; returns (V, T) with "
+        "V = U * T, T integer, and the columns of both summing to zero",
         py::arg("U"));
    m.def("dirichlet_domain", &DELAUNAY::DirichletDomain, 
         "Compute Dirichlet domain of a lattice, input should be a 2x2 or 3x3 matrix representing the lattice basis",

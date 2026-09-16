@@ -312,12 +312,15 @@ double LatticeDiameter(
     return max_dist;
 }
 
-// Compute reduced basis
+// Compute reduced basis (Selling reduction to an obtuse superbase) together
+// with the integer coefficients of the superbase in the input basis
 // Input:
 //  Original basis U: MatrixXd(d, d)
 // Output:
-//  Reduced basis V: MatrixXd(d, d)
-Eigen::MatrixXd reducedBasis(
+//  Reduced basis V: MatrixXd(d, d + 1), columns sum to zero
+//  Coefficients T: MatrixXi(d, d + 1), unimodular in the first d columns,
+//                  columns sum to zero, V = U * T
+std::pair<Eigen::MatrixXd, Eigen::MatrixXi> reducedBasisCoeffs(
     const Eigen::MatrixXd& U
 ) {
     if (U.rows() != U.cols() || (U.cols() != 2 && U.cols() != 3)) {
@@ -326,9 +329,12 @@ Eigen::MatrixXd reducedBasis(
 
     int d = U.rows();
     Eigen::MatrixXd V = Eigen::MatrixXd::Zero(d, d + 1);
+    Eigen::MatrixXi T = Eigen::MatrixXi::Zero(d, d + 1);
     for (int i = 0; i < d; ++i) {
         V.col(i) = U.col(i);
         V.col(d) -= U.col(i);
+        T(i, i) = 1;
+        T(i, d) = -1;
     }
 
     bool reduced = 1;
@@ -350,6 +356,9 @@ Eigen::MatrixXd reducedBasis(
             V.col(h) += V.col(i);
             V.col(i) *= -1;
             V.col(2) = -V.col(0) -V.col(1);
+            T.col(h) += T.col(i);
+            T.col(i) *= -1;
+            T.col(2) = -T.col(0) -T.col(1);
             reduced = 1;
             for (auto c : id) {
                 i = c[0], j = c[1], h = c[2];
@@ -378,6 +387,9 @@ Eigen::MatrixXd reducedBasis(
             V.col(h) += V.col(i);
             V.col(k) += V.col(i);
             V.col(i) *= -1;
+            T.col(h) += T.col(i);
+            T.col(k) += T.col(i);
+            T.col(i) *= -1;
             reduced = 1;
             for (auto c : id) {
                 i = c[0], j = c[1], h = c[2], k = c[3];
@@ -389,7 +401,15 @@ Eigen::MatrixXd reducedBasis(
         }
     }
 
-    return V;
+    return {V, T};
+}
+
+// Compute reduced basis (see reducedBasisCoeffs; kept for the call sites
+// that only need the real-coordinate superbase)
+Eigen::MatrixXd reducedBasis(
+    const Eigen::MatrixXd& U
+) {
+    return reducedBasisCoeffs(U).first;
 }
 
 // Compute Dirichlet domain from reduced basis

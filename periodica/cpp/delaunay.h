@@ -40,6 +40,8 @@ Eigen::MatrixXi DelaunaySkeleton(const Eigen::MatrixXd& points);
 Eigen::MatrixXi DelaunaySkeleton(const Eigen::MatrixXd& points, const Eigen::VectorXd& weights);
 Eigen::MatrixXi EuclideanMST(const Eigen::MatrixXd& points);
 Eigen::MatrixXd reducedBasis(const Eigen::MatrixXd& U);
+
+std::pair<Eigen::MatrixXd, Eigen::MatrixXi> reducedBasisCoeffs(const Eigen::MatrixXd& U);
 std::pair<Eigen::MatrixXd, Eigen::VectorXd> DirichletDomain(const Eigen::MatrixXd& V);
 
 Eigen::MatrixXd canonicalPoints(
