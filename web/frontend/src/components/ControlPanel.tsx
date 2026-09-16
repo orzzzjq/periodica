@@ -177,16 +177,19 @@ export default function ControlPanel() {
             onClick={() => setShowLattice((v) => !v)}
             title="click to expand/collapse"
           >
-            {showLattice ? '▾' : '▸'} Lattice basis (columns = vectors)
+            {showLattice ? '▾' : '▸'} Lattice basis
           </h2>
           {showLattice && (
-            <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
-              {lattice.map((row, i) =>
-                row.map((v, j) => (
-                  <Num key={`${i}-${j}`} value={v} onChange={(x) => setLatticeEntry(i, j, x)} />
-                )),
-              )}
-            </div>
+            <>
+              <div className="section-note">Columns are basis vectors</div>
+              <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
+                {lattice.map((row, i) =>
+                  row.map((v, j) => (
+                    <Num key={`${i}-${j}`} value={v} onChange={(x) => setLatticeEntry(i, j, x)} />
+                  )),
+                )}
+              </div>
+            </>
           )}
         </section>
       )}
