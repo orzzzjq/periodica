@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { saveFile } from '../capture'
+import { parseGeometry, serializeGeometry } from '../geometry'
 import { PRESETS } from '../presets'
 import { useStore } from '../store'
 
@@ -45,6 +47,7 @@ export default function ControlPanel() {
   const removePoint = useStore((s) => s.removePoint)
   const applyPreset = useStore((s) => s.applyPreset)
   const applyRandom = useStore((s) => s.applyRandom)
+  const loadGeometry = useStore((s) => s.loadGeometry)
   const setDimension = useStore((s) => s.setDimension)
   const setCoordMode = useStore((s) => s.setCoordMode)
   const computeNow = useStore((s) => s.computeNow)
@@ -60,9 +63,51 @@ export default function ControlPanel() {
   }, [randomCfg, d, applyRandom])
   const coordLabels = ['x', 'y', 'z'].slice(0, d)
 
+  // geometry-file load/save; parse/save errors show under the Compute button
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  const loadFile = async (file: File) => {
+    try {
+      const g = parseGeometry(await file.text())
+      setRandomCfg(null) // a live Random preset would regenerate over the loaded data
+      loadGeometry(g)
+      setFileError(null)
+    } catch (e) {
+      setFileError(e instanceof Error ? e.message : String(e))
+    }
+  }
+  const saveGeometryFile = async () => {
+    try {
+      const blob = new Blob([serializeGeometry(inputs)], { type: 'text/plain' })
+      await saveFile('geometry.txt', blob)
+    } catch (e) {
+      setFileError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   return (
     <div className="panel">
       <section>
+        <div className="row">
+          File{' '}
+          <button onClick={() => fileInput.current?.click()} title="load a periodica geometry file">
+            Load
+          </button>
+          <button onClick={saveGeometryFile} title="save the current input as a geometry file">
+            Save
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".txt,text/plain"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) loadFile(f)
+              e.target.value = '' // so the same file can be loaded again
+            }}
+          />
+        </div>
         <label className="row">
           Preset{' '}
           <select
@@ -119,7 +164,10 @@ export default function ControlPanel() {
           <button
             className={dirty ? 'active' : ''}
             style={{ width: '100%' }}
-            onClick={computeNow}
+            onClick={() => {
+              setFileError(null)
+              computeNow()
+            }}
             title="run the pipeline with the current inputs"
           >
             Compute
@@ -127,6 +175,7 @@ export default function ControlPanel() {
         </div>
         <div className="status">
           {status === 'loading' && <div className="loading">computing…</div>}
+          {fileError && <div className="error">{fileError}</div>}
           {error && <div className="error">{error}</div>}
         </div>
       </section>

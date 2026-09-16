@@ -1,0 +1,16 @@
+# periodica geometry input: 3D, real coordinates, with a weight column
+geometry:
+1
+dimension:
+3
+lattice:
+# matrix U printed row by row; the lattice vectors are its COLUMNS
+2 0 0
+0 2 0
+0 0 2
+coordinates:
+real
+points:
+2
+0.0 0.0 0.0 0.4
+1.0 1.0 1.0 0.0

@@ -33,6 +33,100 @@ red = "#CD0000"
 blue = "#7E7EFF"
 green = "#30B830"
 
+def _parse_geometry_text(text):
+    """Parse the native 'periodica geometry' v1 text format.
+
+    Sections in fixed order: geometry (version) / dimension / lattice /
+    coordinates (optional, fractional|real, default fractional) / points.
+    The lattice block is the matrix U printed row by row — the lattice
+    vectors are its COLUMNS. Each point row has d coordinates, optionally
+    followed by a weight (uniform per file). '#' comments and blank lines
+    are ignored.
+
+    Returns a dict: d, U (d x d), points (d x n, in the file's coordinate
+    mode), weights (n,), coordinates ('fractional' | 'real').
+    """
+    lines = []
+    for no, raw in enumerate(text.splitlines(), 1):
+        s = raw.split('#', 1)[0].strip()
+        if s:
+            lines.append((no, s.split()))
+    pos = 0
+
+    def take(what):
+        nonlocal pos
+        if pos >= len(lines):
+            raise ValueError(f'unexpected end of file (expected {what})')
+        line = lines[pos]
+        pos += 1
+        return line
+
+    def header(name):
+        no, tokens = take(f"'{name}'")
+        if tokens != [name]:
+            raise ValueError(f"line {no}: expected '{name}'")
+
+    def numbers(no, tokens, count, what):
+        if len(tokens) != count:
+            raise ValueError(f'line {no}: expected {count} numbers ({what}), got {len(tokens)}')
+        try:
+            return [float(t) for t in tokens]
+        except ValueError:
+            raise ValueError(f'line {no}: not a number in {what}') from None
+
+    if not lines or lines[0][1][0] != 'geometry:':
+        raise ValueError("not a periodica geometry file (first line must be 'geometry:')")
+    header('geometry:')
+    no, tokens = take('format version')
+    if tokens != ['1']:
+        raise ValueError(f"line {no}: unsupported geometry format version {' '.join(tokens)!r} (expected 1)")
+
+    header('dimension:')
+    no, tokens = take('dimension value')
+    if tokens not in (['2'], ['3']):
+        raise ValueError(f'line {no}: dimension must be 2 or 3')
+    d = int(tokens[0])
+
+    header('lattice:')
+    U = []
+    for i in range(d):
+        no, tokens = take('lattice row')
+        U.append(numbers(no, tokens, d, f'lattice row {i + 1}'))
+    U = np.array(U)
+    if abs(np.linalg.det(U)) < 1e-12:
+        raise ValueError('lattice basis is singular')
+
+    coordinates = 'fractional'
+    if pos < len(lines) and lines[pos][1] == ['coordinates:']:
+        pos += 1
+        no, tokens = take('coordinate mode')
+        coordinates = ' '.join(tokens)
+        if coordinates not in ('fractional', 'real'):
+            raise ValueError(f"line {no}: coordinates must be 'fractional' or 'real'")
+
+    header('points:')
+    no, tokens = take('point count')
+    if len(tokens) != 1 or not tokens[0].isdigit() or int(tokens[0]) < 1:
+        raise ValueError(f'line {no}: point count must be a positive integer')
+    n = int(tokens[0])
+    points, weights, weighted = [], [], None
+    for i in range(n):
+        no, tokens = take(f'point {i + 1} of {n}')
+        if weighted is None:
+            if len(tokens) not in (d, d + 1):
+                raise ValueError(f'line {no}: expected {d} coordinates (optionally + weight), '
+                                 f'got {len(tokens)} numbers')
+            weighted = len(tokens) == d + 1
+        what = f'{d} coordinates + weight' if weighted else f'{d} coordinates'
+        vals = numbers(no, tokens, d + 1 if weighted else d, what)
+        points.append(vals[:d])
+        weights.append(vals[d] if weighted else 0.0)
+    if pos < len(lines):
+        raise ValueError(f'line {lines[pos][0]}: unexpected content after the points')
+
+    return {'d': d, 'U': U, 'points': np.array(points).T,
+            'weights': np.array(weights), 'coordinates': coordinates}
+
 class Periodica:
     # Stand-in for symbolic perturbation: exactly degenerate inputs (e.g.
     # cocircular quadruples) are triangulated inconsistently across lattice
@@ -47,6 +141,7 @@ class Periodica:
         self.U = INPUT['U']
         self.n_points = INPUT['n_points']
         points = np.asarray(INPUT['points'], dtype=float)
+        self.input_points = points  # raw input, kept for save_geometry
         rng = np.random.default_rng(0)
         self.points = points + rng.normal(0.0, self.PERTURBATION, points.shape)
         if 'weights' in INPUT.keys():
@@ -54,6 +149,43 @@ class Periodica:
 
     def set_weights(self, weights):
         self.weights = np.array(weights)
+
+    def load_geometry(self, file):
+        """Load a native 'periodica geometry' text file (see examples/geometry_*.txt)."""
+        with open(file, 'r') as f:
+            g = _parse_geometry_text(f.read())
+        points = g['points']
+        if g['coordinates'] == 'fractional':
+            points = g['U'] @ points  # columns of U are the lattice vectors
+        self.set_geometry({'d': g['d'], 'U': g['U'], 'n_points': points.shape[1],
+                           'points': points, 'weights': g['weights']})
+
+    def save_geometry(self, file, coordinates='real'):
+        """Write the current (unperturbed) input as a geometry file.
+
+        coordinates='real' round-trips the stored points exactly;
+        'fractional' converts through the lattice basis first.
+        """
+        if not hasattr(self, 'input_points'):
+            raise Exception('No input geometry')
+        if coordinates not in ('fractional', 'real'):
+            raise ValueError("coordinates must be 'fractional' or 'real'")
+        U = np.asarray(self.U, dtype=float)
+        P = self.input_points
+        if coordinates == 'fractional':
+            P = np.linalg.solve(U, P)
+        n = P.shape[1]
+        weights = np.asarray(getattr(self, 'weights', np.zeros(n)), dtype=float).reshape(-1)
+        weighted = np.any(weights != 0)  # the weight column is written only when used
+        lines = ['geometry:', '1', 'dimension:', str(self.d), 'lattice:',
+                 '# matrix U printed row by row; the lattice vectors are its COLUMNS']
+        lines += [' '.join(repr(float(v)) for v in row) for row in U]
+        lines += ['coordinates:', coordinates, 'points:', str(n)]
+        for i in range(n):
+            vals = list(P[:, i]) + ([weights[i]] if weighted else [])
+            lines.append(' '.join(repr(float(v)) for v in vals))
+        with open(file, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
 
     @timing
     def periodic_delaunay(self):

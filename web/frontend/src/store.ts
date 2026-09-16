@@ -73,6 +73,7 @@ interface State {
   removePoint: (row: number) => void
   applyPreset: (preset: Preset) => void
   applyRandom: (seed: number, nPoints: number) => void
+  loadGeometry: (g: Inputs) => void
   setDimension: (d: 2 | 3) => void
   setCoordMode: (mode: 'fractional' | 'real') => void
 }
@@ -259,6 +260,16 @@ export const useStore = create<State>((set, get) => {
         lattice: preset.lattice.map((r) => [...r]),
         points: preset.points.map((r) => [...r]),
         weights: [...preset.weights],
+      })),
+
+    loadGeometry: (g) =>
+      update((inp) => ({
+        ...inp,
+        d: g.d,
+        lattice: g.lattice.map((r) => [...r]),
+        points: g.points.map((r) => [...r]),
+        weights: [...g.weights],
+        coordMode: g.coordMode,
       })),
 
     applyRandom: (seed, nPoints) =>

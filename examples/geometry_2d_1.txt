@@ -1,0 +1,16 @@
+# periodica geometry input: dimension, lattice basis, points (+ optional weights)
+geometry:
+1
+dimension:
+2
+lattice:
+# matrix U printed row by row; the lattice vectors are its COLUMNS
+1 0
+0 1
+coordinates:
+fractional
+points:
+3
+0.25 0.25
+0.75 0.25
+0.50 0.75

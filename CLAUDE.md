@@ -100,6 +100,29 @@ Arcs carry **lattice shift vectors** — an arc from u to v with shift s connect
 copy of v translated by U·s. Shift-vector sign conventions are a recurring source of bugs
 (see recent commits: "negate shift vector when swapping root").
 
+## Geometry file format (`examples/geometry_*.txt`)
+
+Native input format (v1) for a lattice + points (+ optional weights). Loaded/saved by the
+web UI (File Load/Save in the input panel, parser in `web/frontend/src/geometry.ts`) and by
+`Periodica.load_geometry` / `save_geometry`:
+
+```
+geometry:                 # magic header; next line is the format version
+1
+dimension:
+<d>                       # 2 or 3
+lattice:
+<d rows of the matrix U>  # the lattice vectors are the COLUMNS of the block
+coordinates:              # optional section; fractional (default) | real
+fractional
+points:
+<n>
+<d coords per row, optionally followed by a weight>   # arity uniform per file
+```
+
+`#` starts a comment, blank lines are ignored. Fractional coordinates are basis
+coefficients (real = U·p).
+
 ## Conventions & gotchas
 
 - Points matrices are `d × n` (points as columns), lattice basis `U` is `d × d`.
