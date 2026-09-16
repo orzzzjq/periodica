@@ -220,6 +220,15 @@
   margin-bottom: 16px;
 }
 
+.panel h2.collapsible {
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel h2.collapsible:hover {
+  color: #222;
+}
+
 .row {
   display: flex;
   align-items: center;
@@ -318,6 +327,8 @@ button:disabled {
   height: 100%;
   align-items: center;
   justify-content: center;
+  text-align: center;
+  padding: 0 24px;
   color: #888;
 }
 

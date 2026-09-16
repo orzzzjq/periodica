@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { saveFile } from '../capture'
 import { parseGeometry, serializeGeometry } from '../geometry'
-import { PRESETS } from '../presets'
 import { useStore } from '../store'
 
 function Num({ value, onChange, step = 0.05, min, style }: {
@@ -45,9 +44,9 @@ export default function ControlPanel() {
   const setWeight = useStore((s) => s.setWeight)
   const addPoint = useStore((s) => s.addPoint)
   const removePoint = useStore((s) => s.removePoint)
-  const applyPreset = useStore((s) => s.applyPreset)
   const applyRandom = useStore((s) => s.applyRandom)
   const loadGeometry = useStore((s) => s.loadGeometry)
+  const hasGeometry = useStore((s) => s.hasGeometry)
   const setDimension = useStore((s) => s.setDimension)
   const setCoordMode = useStore((s) => s.setCoordMode)
   const computeNow = useStore((s) => s.computeNow)
@@ -55,13 +54,17 @@ export default function ControlPanel() {
 
   const { d, lattice, points, weights, coordMode } = inputs
 
-  // Random preset config; null = a regular preset (or manual input) is active.
+  // Random-input config; null = a loaded file (or manual input) is active.
   // Any change of seed / point count / dimension regenerates deterministically.
   const [randomCfg, setRandomCfg] = useState<{ seed: number; n: number } | null>(null)
   useEffect(() => {
     if (randomCfg) applyRandom(randomCfg.seed, randomCfg.n)
   }, [randomCfg, d, applyRandom])
   const coordLabels = ['x', 'y', 'z'].slice(0, d)
+
+  // section collapse; by default the lattice is shown and the points are not
+  const [showLattice, setShowLattice] = useState(true)
+  const [showPoints, setShowPoints] = useState(false)
 
   // geometry-file load/save; parse/save errors show under the Compute button
   const fileInput = useRef<HTMLInputElement>(null)
@@ -93,8 +96,19 @@ export default function ControlPanel() {
           <button onClick={() => fileInput.current?.click()} title="load a periodica geometry file">
             Load
           </button>
-          <button onClick={saveGeometryFile} title="save the current input as a geometry file">
+          <button
+            onClick={saveGeometryFile}
+            disabled={!hasGeometry}
+            title="save the current input as a geometry file"
+          >
             Save
+          </button>
+          <button
+            className={randomCfg ? 'active' : ''}
+            onClick={() => setRandomCfg((cfg) => cfg ?? { seed: 0, n: 2 })}
+            title="generate a reproducible random input (seeded)"
+          >
+            Random
           </button>
           <input
             ref={fileInput}
@@ -108,31 +122,6 @@ export default function ControlPanel() {
             }}
           />
         </div>
-        <label className="row">
-          Preset{' '}
-          <select
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value === '__random') {
-                setRandomCfg((cfg) => cfg ?? { seed: 0, n: 2 })
-                return
-              }
-              setRandomCfg(null)
-              const p = PRESETS.find((p) => p.name === e.target.value)
-              if (p) applyPreset(p)
-            }}
-          >
-            <option value="" disabled>
-              choose…
-            </option>
-            {PRESETS.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-            <option value="__random">Random</option>
-          </select>
-        </label>
         <div className="row">
           Dimension{' '}
           <button className={d === 2 ? 'active' : ''} onClick={() => setDimension(2)}>2D</button>
@@ -162,8 +151,9 @@ export default function ControlPanel() {
       <section>
         <div className="row">
           <button
-            className={dirty ? 'active' : ''}
+            className={dirty && hasGeometry ? 'active' : ''}
             style={{ width: '100%' }}
+            disabled={!hasGeometry}
             onClick={() => {
               setFileError(null)
               computeNow()
@@ -180,67 +170,89 @@ export default function ControlPanel() {
         </div>
       </section>
 
-      <section>
-        <h2>Lattice basis (columns = vectors)</h2>
-        <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
-          {lattice.map((row, i) =>
-            row.map((v, j) => (
-              <Num key={`${i}-${j}`} value={v} onChange={(x) => setLatticeEntry(i, j, x)} />
-            )),
+      {hasGeometry && (
+        <section>
+          <h2
+            className="collapsible"
+            onClick={() => setShowLattice((v) => !v)}
+            title="click to expand/collapse"
+          >
+            {showLattice ? '▾' : '▸'} Lattice basis (columns = vectors)
+          </h2>
+          {showLattice && (
+            <div className="matrix" style={{ gridTemplateColumns: `repeat(${d}, 1fr)` }}>
+              {lattice.map((row, i) =>
+                row.map((v, j) => (
+                  <Num key={`${i}-${j}`} value={v} onChange={(x) => setLatticeEntry(i, j, x)} />
+                )),
+              )}
+            </div>
           )}
-        </div>
-      </section>
+        </section>
+      )}
 
-      <section>
-        <h2>Points &amp; weights</h2>
-        <div className="row">
-          <button
-            className={coordMode === 'fractional' ? 'active' : ''}
-            onClick={() => setCoordMode('fractional')}
-            title="coordinates are coefficients of the lattice basis vectors"
+      {hasGeometry && (
+        <section>
+          <h2
+            className="collapsible"
+            onClick={() => setShowPoints((v) => !v)}
+            title="click to expand/collapse"
           >
-            fractional
-          </button>
-          <button
-            className={coordMode === 'real' ? 'active' : ''}
-            onClick={() => setCoordMode('real')}
-            title="coordinates are Cartesian, used as-is"
-          >
-            real
-          </button>
-        </div>
-        <table className="points">
-          <thead>
-            <tr>
-              {coordLabels.map((c) => (
-                <th key={c}>{c}</th>
-              ))}
-              <th>w</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {points.map((p, row) => (
-              <tr key={row} className={results?.points.hidden.includes(row) ? 'hidden-point' : ''}>
-                {p.map((v, j) => (
-                  <td key={j}>
-                    <Num value={v} onChange={(x) => setPointCoord(row, j, x)} />
-                  </td>
-                ))}
-                <td>
-                  <Num value={weights[row]} onChange={(x) => setWeight(row, x)} step={0.01} min={0} />
-                </td>
-                <td>
-                  <button onClick={() => removePoint(row)} disabled={points.length <= 1} title="remove">
-                    ×
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <button onClick={addPoint}>+ add point</button>
-      </section>
+            {showPoints ? '▾' : '▸'} Points &amp; weights
+          </h2>
+          {showPoints && (
+            <>
+              <div className="row">
+                <button
+                  className={coordMode === 'fractional' ? 'active' : ''}
+                  onClick={() => setCoordMode('fractional')}
+                  title="coordinates are coefficients of the lattice basis vectors"
+                >
+                  fractional
+                </button>
+                <button
+                  className={coordMode === 'real' ? 'active' : ''}
+                  onClick={() => setCoordMode('real')}
+                  title="coordinates are Cartesian, used as-is"
+                >
+                  real
+                </button>
+              </div>
+              <table className="points">
+                <thead>
+                  <tr>
+                    {coordLabels.map((c) => (
+                      <th key={c}>{c}</th>
+                    ))}
+                    <th>w</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {points.map((p, row) => (
+                    <tr key={row} className={results?.points.hidden.includes(row) ? 'hidden-point' : ''}>
+                      {p.map((v, j) => (
+                        <td key={j}>
+                          <Num value={v} onChange={(x) => setPointCoord(row, j, x)} />
+                        </td>
+                      ))}
+                      <td>
+                        <Num value={weights[row]} onChange={(x) => setWeight(row, x)} step={0.01} min={0} />
+                      </td>
+                      <td>
+                        <button onClick={() => removePoint(row)} disabled={points.length <= 1} title="remove">
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <button onClick={addPoint}>+ add point</button>
+            </>
+          )}
+        </section>
+      )}
 
       <section className="status">
         {results && results.points.hidden.length > 0 && (

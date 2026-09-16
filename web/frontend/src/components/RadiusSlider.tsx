@@ -50,6 +50,8 @@ export default function RadiusSlider() {
   const radiusVor = useStore((s) => s.ui.radiusVor)
   const setUi = useStore((s) => s.setUi)
 
+  if (!results) return null
+
   // f_Del: from the earliest Delaunay birth to the barcode plot's xmax
   // (slightly past the largest finite value, same padding as the plot).
   let dMin = 0

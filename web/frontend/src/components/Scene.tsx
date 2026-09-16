@@ -944,6 +944,8 @@ function FiltrationBalls({ results, radius }: { results: ComputeResponse; radius
 export default function Scene() {
   const results = useStore((s) => s.results)
   const ui = useStore((s) => s.ui)
+  const status = useStore((s) => s.status)
+  const hasGeometry = useStore((s) => s.hasGeometry)
 
   const extent = useMemo(() => {
     if (!results) return 2
@@ -952,7 +954,15 @@ export default function Scene() {
     return m || 2
   }, [results])
 
-  if (!results) return <div className="scene-placeholder">computing…</div>
+  if (!results) {
+    const hint =
+      status === 'loading'
+        ? 'computing…'
+        : hasGeometry
+          ? 'press Compute to run the pipeline'
+          : 'load a geometry file or generate a random input'
+    return <div className="scene-placeholder">{hint}</div>
+  }
 
   const is2d = results.d === 2
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { compute, type ComputeResponse } from './api'
-import { DEFAULT_PRESET, type Preset } from './presets'
+import { DEFAULT_PRESET } from './presets'
 
 export interface TreeViewState {
   x: [number, number]
@@ -63,6 +63,9 @@ interface State {
   error: string | null
   // inputs changed since the last compute (highlights the Compute button)
   dirty: boolean
+  // false until a geometry file is loaded or a random input is generated;
+  // the lattice/points sections stay hidden and nothing is computed before
+  hasGeometry: boolean
   ui: UiState
   setUi: (partial: Partial<UiState>) => void
   computeNow: () => void
@@ -71,7 +74,6 @@ interface State {
   setWeight: (row: number, value: number) => void
   addPoint: () => void
   removePoint: (row: number) => void
-  applyPreset: (preset: Preset) => void
   applyRandom: (seed: number, nPoints: number) => void
   loadGeometry: (g: Inputs) => void
   setDimension: (d: 2 | 3) => void
@@ -175,6 +177,7 @@ export const useStore = create<State>((set, get) => {
     status: 'idle',
     error: null,
     dirty: false,
+    hasGeometry: false,
     ui: {
       radius: 0,
       // -Infinity = "at the slider minimum" (the actual minimum depends on
@@ -206,6 +209,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     computeNow: () => {
+      if (!get().hasGeometry) return
       set({ dirty: false })
       scheduleRecompute(get, set, 0)
     },
@@ -213,7 +217,11 @@ export const useStore = create<State>((set, get) => {
     setUi: (partial) => {
       const prev = get().ui
       set({ ui: { ...prev, ...partial } })
-      if (partial.imageSize !== undefined && partial.imageSize !== prev.imageSize) {
+      if (
+        get().hasGeometry &&
+        partial.imageSize !== undefined &&
+        partial.imageSize !== prev.imageSize
+      ) {
         scheduleRecompute(get, set)
       }
     },
@@ -253,16 +261,7 @@ export const useStore = create<State>((set, get) => {
         weights: inp.weights.filter((_, i) => i !== row),
       })),
 
-    applyPreset: (preset) =>
-      update((inp) => ({
-        ...inp,
-        d: preset.d,
-        lattice: preset.lattice.map((r) => [...r]),
-        points: preset.points.map((r) => [...r]),
-        weights: [...preset.weights],
-      })),
-
-    loadGeometry: (g) =>
+    loadGeometry: (g) => {
       update((inp) => ({
         ...inp,
         d: g.d,
@@ -270,14 +269,18 @@ export const useStore = create<State>((set, get) => {
         points: g.points.map((r) => [...r]),
         weights: [...g.weights],
         coordMode: g.coordMode,
-      })),
+      }))
+      set({ hasGeometry: true })
+    },
 
-    applyRandom: (seed, nPoints) =>
+    applyRandom: (seed, nPoints) => {
       update((inp) => {
         const n = Math.max(1, Math.min(100, Math.round(nPoints) || 1))
         // random points are fractional by construction
         return { ...inp, ...randomGeometry(inp.d, seed, n), coordMode: 'fractional' as const }
-      }),
+      })
+      set({ hasGeometry: true })
+    },
 
     setDimension: (d) => {
       if (d === get().inputs.d) return
@@ -298,9 +301,6 @@ export const useStore = create<State>((set, get) => {
     },
   }
 })
-
-// initial compute on module load
-scheduleRecompute(useStore.getState as never, useStore.setState as never, 0)
 
 // debugging/testing probe
 if (typeof window !== 'undefined') {
