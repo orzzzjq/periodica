@@ -2,8 +2,11 @@
 
 Run with: .venv/bin/python tests/test_periodic_grid.py
 
-Barcode convention: bcodes[k] holds the signed bars of the coefficient of
-R^(d-k), so bounded-component (exponent-0) bars live in bcodes[d].
+Barcode convention: bcodes[k] holds the signed bars of the R^k coefficient
+of the component-count polynomial (copies per ball of radius R). Bounded
+components replicate like the ball volume, so their bars live in bcodes[d]
+with multiplicity 1/|det U|; the fully wrapped component contributes the
+R^0 infinite bar.
 """
 import sys
 from itertools import product

@@ -272,6 +272,92 @@ function FiltrationEdges({ results, radius }: { results: ComputeResponse; radius
   return <PrefixSegments data={data} threshold={radius} color={BLUE} opacity={opacity} />
 }
 
+// ---- grid mode: colored points + nearest-neighbor edges of a scalar field ----
+
+// compact viridis approximation, v normalized to [0, 1]
+const VIRIDIS: [number, number, number][] = [
+  [0.267, 0.005, 0.329],
+  [0.229, 0.322, 0.545],
+  [0.128, 0.567, 0.551],
+  [0.369, 0.789, 0.383],
+  [0.993, 0.906, 0.144],
+]
+
+function valueColor(v: number, min: number, max: number): string {
+  const t = max > min ? (v - min) / (max - min) : 0.5
+  const x = Math.min(Math.max(t, 0), 1) * (VIRIDIS.length - 1)
+  const i = Math.min(Math.floor(x), VIRIDIS.length - 2)
+  const f = x - i
+  const c = VIRIDIS[i].map((a, k) => a + f * (VIRIDIS[i + 1][k] - a))
+  return new THREE.Color(c[0], c[1], c[2]).getStyle()
+}
+
+// Grid points colored by function value; points not yet in the sublevel set
+// (value > f) are ghosted, as are points outside a picked merge-tree subtree.
+function GridPoints({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const g = results.grid
+  const verts = useSubtreeVerts('delaunay')
+  const range = useMemo(() => {
+    if (!g) return [0, 1]
+    return [Math.min(...g.values), Math.max(...g.values)]
+  }, [g])
+  if (!g) return null
+  const t = radius + filtEps(radius)
+  return (
+    <>
+      {g.positions3x.map((p, i) => {
+        const orig = g.originalIndex[i]
+        const v = g.values[orig]
+        const born = v <= t && (!verts || verts.has(orig))
+        return (
+          <mesh key={i} position={to3(p)}>
+            <sphereGeometry args={[g.canonical[i] ? 0.035 : 0.022, 16, 16]} />
+            <meshBasicMaterial
+              color={valueColor(v, range[0], range[1])}
+              transparent={!born}
+              opacity={born ? 1 : 0.2}
+            />
+          </mesh>
+        )
+      })}
+    </>
+  )
+}
+
+// All grid edges (the d nearest-neighbor directions), tiled over the 3x
+// domain — the grid analogue of the full Delaunay skeleton.
+function GridSkeleton({ results }: { results: ComputeResponse }) {
+  const geometry = useMemo(() => {
+    if (!results.grid) return null
+    const pts = tile3xSegments(results.grid.arcs, results, results.d === 2 ? 0.001 : 0)
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pts.flat(), 3))
+    return g
+  }, [results])
+  if (!geometry) return null
+  return (
+    <lineSegments geometry={geometry}>
+      <lineBasicMaterial color={BLUE} transparent opacity={0.35} />
+    </lineSegments>
+  )
+}
+
+// Sublevel set of the lower-star filtration: grid edges with
+// max(f_start, f_end) below the threshold, tiled over the 3x domain.
+function GridFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const verts = useSubtreeVerts('delaunay')
+  const data = useMemo(() => {
+    const g = results.grid
+    if (!g) return { points: [], filtration: [] } as TiledSegments
+    const arcs = verts
+      ? g.arcs.filter((a) => verts.has(a.vStart) && verts.has(a.vEnd))
+      : g.arcs
+    return buildTiledSegments(arcs, results, results.d === 2 ? 0.002 : 0)
+  }, [results, verts])
+  const opacity = useStore((s) => s.ui.filtEdgeOpacity)
+  return <PrefixSegments data={data} threshold={radius} color={BLUE} opacity={opacity} />
+}
+
 const RED = '#dd2222'
 
 function VoronoiSkeleton({ results }: { results: ComputeResponse }) {
@@ -1008,16 +1094,26 @@ export default function Scene() {
             <Domain3D polytope={results.domain3x as Polytope3D} translucent={false} />
           </>
         ))}
-      {ui.showFullSkeleton && <FullSkeleton results={results} />}
-      {ui.showArcs && <QuotientArcs results={results} />}
-      {ui.showFiltrationEdges && <FiltrationEdges results={results} radius={ui.radius} />}
-      {ui.showVoronoiFiltrationEdges && <VoronoiFiltrationEdges results={results} radius={ui.radiusVor} />}
-      {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
-      {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
-      {ui.showPoints && <Points results={results} />}
-      {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
-      {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
-      {ui.showVoronoiBalls && <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />}
+      {results.grid ? (
+        <>
+          {ui.showFullSkeleton && <GridSkeleton results={results} />}
+          {ui.showFiltrationEdges && <GridFiltrationEdges results={results} radius={ui.radius} />}
+          {ui.showPoints && <GridPoints results={results} radius={ui.radius} />}
+        </>
+      ) : (
+        <>
+          {ui.showFullSkeleton && <FullSkeleton results={results} />}
+          {ui.showArcs && <QuotientArcs results={results} />}
+          {ui.showFiltrationEdges && <FiltrationEdges results={results} radius={ui.radius} />}
+          {ui.showVoronoiFiltrationEdges && <VoronoiFiltrationEdges results={results} radius={ui.radiusVor} />}
+          {ui.showVoronoiSkeleton && <VoronoiSkeleton results={results} />}
+          {ui.showVoronoiArcs && <VoronoiArcs results={results} />}
+          {ui.showPoints && <Points results={results} />}
+          {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
+          {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
+          {ui.showVoronoiBalls && <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />}
+        </>
+      )}
     </Canvas>
   )
 }

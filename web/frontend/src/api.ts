@@ -101,8 +101,18 @@ export interface ComputeResponse {
   fullEdges: number[][] // index pairs into positions3x
   quotientArcs: QuotientArc[]
   maxRadius: number
-  // present iff the result came from a grid input (point-set fields empty)
-  grid?: { shape: number[] } | null
+  // present iff the result came from a grid input (point-set fields empty).
+  // Grid points are canonicalized into the Dirichlet cell and tiled over the
+  // 3x domain like the Delaunay points; arcs are resolved segments with the
+  // quotient vertex ids of their endpoints.
+  grid?: {
+    shape: number[]
+    values: number[] // per quotient vertex, C order
+    positions3x: number[][]
+    originalIndex: number[]
+    canonical: boolean[]
+    arcs: { start: number[]; end: number[]; filtration: number; vStart: number; vEnd: number }[]
+  } | null
   barcodes: Bar[][] // d+1 lists (Delaunay)
   images: ImagesData // (Delaunay)
   tree: TreeEvent[][] // (Delaunay)

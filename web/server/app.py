@@ -295,8 +295,36 @@ def compute_grid(req: GridComputeRequest):
         images = p.images(req.imageSize)
         V = _periodica.reduced_basis(U)
         A, b = _periodica.dirichlet_domain(V)
+
+        # scene geometry: the grid points are a periodic point set — map them
+        # into the Dirichlet cell and tile the 3x domain exactly like the
+        # Delaunay pipeline. The perturbation only breaks the boundary ties a
+        # uniform grid necessarily has under canonicalization (display only).
+        N = np.array(values.shape)
+        idx = np.indices(values.shape).reshape(d, -1)  # C order = values.ravel()
+        P = U @ (idx / N[:, None])
+        P = P + np.random.default_rng(0).normal(0.0, Periodica.PERTURBATION, P.shape)
+        canonical = _periodica.canonical_points(A, b, P)
+        P3x, I, _shifts = _periodica.points_in_3x_domain(V, A, b, canonical)
+        I = np.asarray(I).reshape(-1)
+        is_canonical = np.all(np.isclose(P3x, canonical[:, I], atol=1e-9), axis=0)
     except Exception as e:
         raise HTTPException(400, f'computation failed: {e}')
+
+    # canonicalization moved point g by U·k_g, so an arc (s, t, shift) based
+    # at the canonical copy of s ends at canonical t with shift + k_s - k_t
+    K = np.rint(np.linalg.solve(U, canonical - P)).astype(int)
+    arcs = []
+    for i in range(p.quotient_arcs.shape[0]):
+        s, t = int(p.quotient_arcs[i, 0]), int(p.quotient_arcs[i, 1])
+        shift = p.quotient_arc_shift[:, i] + K[:, s] - K[:, t]
+        arcs.append({
+            'start': canonical[:, s].tolist(),
+            'end': (canonical[:, t] + U @ shift).tolist(),
+            'filtration': float(p.quotient_arc_filtration[i]),
+            'vStart': s,
+            'vEnd': t,
+        })
 
     desc = encode_descriptors(barcodes, images, p.tree, req.imageSize)
     # Same response shape as /api/compute so the descriptor panels work
@@ -317,7 +345,14 @@ def compute_grid(req: GridComputeRequest):
         'fullEdges': [],
         'quotientArcs': [],
         'maxRadius': float(np.abs(values).max()) or 1.0,
-        'grid': {'shape': list(values.shape)},
+        'grid': {
+            'shape': list(values.shape),
+            'values': values.ravel().tolist(),  # per quotient vertex (C order)
+            'positions3x': P3x.T.tolist(),
+            'originalIndex': I.tolist(),
+            'canonical': is_canonical.tolist(),
+            'arcs': arcs,
+        },
         'barcodes': desc['barcodes'],
         'images': desc['images'],
         'tree': desc['tree'],

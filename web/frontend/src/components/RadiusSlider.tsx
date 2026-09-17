@@ -76,7 +76,14 @@ export default function RadiusSlider() {
 
   return (
     <>
-      <SliderRow tex={'f_{\\text{Del}}'} value={radius} min={dMin} max={dMax} onChange={(v) => setUi({ radius: v })} />
+      <SliderRow
+        // grid mode: the threshold is a plain function value, not a radius
+        tex={results.grid ? 'f' : 'f_{\\text{Del}}'}
+        value={radius}
+        min={dMin}
+        max={dMax}
+        onChange={(v) => setUi({ radius: v })}
+      />
       {vor && (
         <SliderRow
           tex={'f_{\\text{Vor}}'}
