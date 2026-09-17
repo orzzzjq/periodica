@@ -1,0 +1,19 @@
+# 3D grid example: 2x2x2 field on a cubic lattice; value rows are in C order
+# (first index slowest), one row of the last axis per line
+grid:
+1
+dimension:
+3
+lattice:
+2 0 0
+0 2 0
+0 0 2
+shape:
+2 2 2
+values:
+# i1 = 0
+0.0 0.3
+0.5 0.9
+# i1 = 1
+0.4 0.8
+0.7 1.0

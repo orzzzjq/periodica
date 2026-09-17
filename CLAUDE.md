@@ -123,6 +123,27 @@ points:
 `#` starts a comment, blank lines are ignored. Fractional coordinates are basis
 coefficients (real = U·p).
 
+## Grid file format (`examples/grid_*.txt`)
+
+Native input (v1) for a periodic scalar field on a uniform fractional grid, consumed by
+`Periodica.load_grid` / `save_grid` → `periodic_grid(U, values)` (grid quotient complex
+with lower-star filtration; same lexical rules and lattice convention as above):
+
+```
+grid:
+1
+dimension:
+<d>
+lattice:
+<d rows of the matrix U>
+shape:
+<N1 ... Nd>
+values:
+<one row of the last axis (Nd numbers) per line, C order (first index slowest)>
+```
+
+`values[i1,...,id]` is the function value at the fractional grid point (i1/N1, ..., id/Nd).
+
 ## Conventions & gotchas
 
 - Points matrices are `d × n` (points as columns), lattice basis `U` is `d × d`.

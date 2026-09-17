@@ -159,7 +159,59 @@ def test_small_N():
     print('PASS small N (self-loops, parallel edges)')
 
 
-# ---- 5. arc bookkeeping invariants ----
+# ---- 5. grid file format ----
+
+def test_grid_file():
+    import tempfile
+    from periodica.core import _parse_grid_text
+
+    root = Path(__file__).resolve().parent.parent
+    # the 2D example is exactly the wrap-threshold field
+    p = Periodica()
+    p.load_grid(root / 'examples' / 'grid_2d_1.txt')
+    assert np.array_equal(p.grid_values, [[0.0, 0.1, 0.2], [0.5, 0.8, 0.85], [0.6, 0.87, 0.9]])
+    p.merge_tree()
+    assert finite_positive_bars(p.barcodes()[2]) == [(0.0, 0.2)]
+
+    q = Periodica()
+    q.load_grid(root / 'examples' / 'grid_3d_1.txt')
+    assert q.d == 3 and q.grid_values.shape == (2, 2, 2)
+    assert np.allclose(q.U, 2 * np.eye(3))
+    q.merge_tree()
+    q.barcodes()
+
+    # save/load round-trip
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / 'rt.txt'
+        for src in (p, q):
+            src.save_grid(f)
+            r = Periodica()
+            r.load_grid(f)
+            assert np.array_equal(r.grid_values, src.grid_values)
+            assert np.allclose(r.U, src.U)
+            assert np.array_equal(r.grid_directions, src.grid_directions)
+
+    # parse errors
+    def expect_error(text, frag):
+        try:
+            _parse_grid_text(text)
+        except ValueError as e:
+            assert frag in str(e), (frag, str(e))
+            return
+        raise AssertionError(f'no error for {frag!r}')
+
+    head = 'grid:\n1\ndimension:\n2\nlattice:\n1 0\n0 1\n'
+    expect_error('geometry:\n1\n', "first line must be 'grid:'")
+    expect_error('grid:\n2\n', 'unsupported grid format version')
+    expect_error(head + 'shape:\n3\n', 'shape must be 2 positive integers')
+    expect_error(head + 'shape:\n3 0\n', 'shape must be 2 positive integers')
+    expect_error(head + 'shape:\n2 3\nvalues:\n1 2 3\n4 5\n', 'expected 3 numbers (3 values), got 2')
+    expect_error(head + 'shape:\n2 3\nvalues:\n1 2 3\n', 'unexpected end of file (expected value row 2 of 2)')
+    expect_error(head + 'shape:\n2 2\nvalues:\n1 2\n3 4\n5 6\n', 'unexpected content after the values')
+    print('PASS grid file format (examples, round-trip, parse errors)')
+
+
+# ---- 6. arc bookkeeping invariants ----
 
 def test_invariants():
     rng = np.random.default_rng(11)
@@ -192,5 +244,6 @@ if __name__ == '__main__':
     test_against_gudhi()
     test_wrap_events()
     test_small_N()
+    test_grid_file()
     test_invariants()
     print('All periodic_grid tests passed.')

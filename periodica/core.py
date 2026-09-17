@@ -33,6 +33,75 @@ red = "#CD0000"
 blue = "#7E7EFF"
 green = "#30B830"
 
+class _SectionParser:
+    """Line cursor shared by the sectioned text formats (geometry/grid
+    files): '#' comments and blank lines are ignored, tokens are separated
+    by any whitespace, sections appear in a fixed order."""
+
+    def __init__(self, text):
+        self.lines = []
+        for no, raw in enumerate(text.splitlines(), 1):
+            s = raw.split('#', 1)[0].strip()
+            if s:
+                self.lines.append((no, s.split()))
+        self.pos = 0
+
+    def take(self, what):
+        if self.pos >= len(self.lines):
+            raise ValueError(f'unexpected end of file (expected {what})')
+        line = self.lines[self.pos]
+        self.pos += 1
+        return line
+
+    def header(self, name):
+        no, tokens = self.take(f"'{name}'")
+        if tokens != [name]:
+            raise ValueError(f"line {no}: expected '{name}'")
+
+    def peek_header(self, name):
+        return self.pos < len(self.lines) and self.lines[self.pos][1] == [name]
+
+    @staticmethod
+    def numbers(no, tokens, count, what):
+        if len(tokens) != count:
+            raise ValueError(f'line {no}: expected {count} numbers ({what}), got {len(tokens)}')
+        try:
+            return [float(t) for t in tokens]
+        except ValueError:
+            raise ValueError(f'line {no}: not a number in {what}') from None
+
+    def magic(self, name, kind):
+        if not self.lines or self.lines[0][1][0] != name:
+            raise ValueError(f"not a periodica {kind} file (first line must be '{name}')")
+        self.header(name)
+        no, tokens = self.take('format version')
+        if tokens != ['1']:
+            raise ValueError(f"line {no}: unsupported {kind} format version "
+                             f"{' '.join(tokens)!r} (expected 1)")
+
+    def dimension(self):
+        self.header('dimension:')
+        no, tokens = self.take('dimension value')
+        if tokens not in (['2'], ['3']):
+            raise ValueError(f'line {no}: dimension must be 2 or 3')
+        return int(tokens[0])
+
+    def lattice(self, d):
+        self.header('lattice:')
+        U = []
+        for i in range(d):
+            no, tokens = self.take('lattice row')
+            U.append(self.numbers(no, tokens, d, f'lattice row {i + 1}'))
+        U = np.array(U)
+        if abs(np.linalg.det(U)) < 1e-12:
+            raise ValueError('lattice basis is singular')
+        return U
+
+    def done(self, what):
+        if self.pos < len(self.lines):
+            raise ValueError(f'line {self.lines[self.pos][0]}: unexpected content after the {what}')
+
+
 def _parse_geometry_text(text):
     """Parse the native 'periodica geometry' v1 text format.
 
@@ -46,86 +115,74 @@ def _parse_geometry_text(text):
     Returns a dict: d, U (d x d), points (d x n, in the file's coordinate
     mode), weights (n,), coordinates ('fractional' | 'real').
     """
-    lines = []
-    for no, raw in enumerate(text.splitlines(), 1):
-        s = raw.split('#', 1)[0].strip()
-        if s:
-            lines.append((no, s.split()))
-    pos = 0
-
-    def take(what):
-        nonlocal pos
-        if pos >= len(lines):
-            raise ValueError(f'unexpected end of file (expected {what})')
-        line = lines[pos]
-        pos += 1
-        return line
-
-    def header(name):
-        no, tokens = take(f"'{name}'")
-        if tokens != [name]:
-            raise ValueError(f"line {no}: expected '{name}'")
-
-    def numbers(no, tokens, count, what):
-        if len(tokens) != count:
-            raise ValueError(f'line {no}: expected {count} numbers ({what}), got {len(tokens)}')
-        try:
-            return [float(t) for t in tokens]
-        except ValueError:
-            raise ValueError(f'line {no}: not a number in {what}') from None
-
-    if not lines or lines[0][1][0] != 'geometry:':
-        raise ValueError("not a periodica geometry file (first line must be 'geometry:')")
-    header('geometry:')
-    no, tokens = take('format version')
-    if tokens != ['1']:
-        raise ValueError(f"line {no}: unsupported geometry format version {' '.join(tokens)!r} (expected 1)")
-
-    header('dimension:')
-    no, tokens = take('dimension value')
-    if tokens not in (['2'], ['3']):
-        raise ValueError(f'line {no}: dimension must be 2 or 3')
-    d = int(tokens[0])
-
-    header('lattice:')
-    U = []
-    for i in range(d):
-        no, tokens = take('lattice row')
-        U.append(numbers(no, tokens, d, f'lattice row {i + 1}'))
-    U = np.array(U)
-    if abs(np.linalg.det(U)) < 1e-12:
-        raise ValueError('lattice basis is singular')
+    p = _SectionParser(text)
+    p.magic('geometry:', 'geometry')
+    d = p.dimension()
+    U = p.lattice(d)
 
     coordinates = 'fractional'
-    if pos < len(lines) and lines[pos][1] == ['coordinates:']:
-        pos += 1
-        no, tokens = take('coordinate mode')
+    if p.peek_header('coordinates:'):
+        p.pos += 1
+        no, tokens = p.take('coordinate mode')
         coordinates = ' '.join(tokens)
         if coordinates not in ('fractional', 'real'):
             raise ValueError(f"line {no}: coordinates must be 'fractional' or 'real'")
 
-    header('points:')
-    no, tokens = take('point count')
+    p.header('points:')
+    no, tokens = p.take('point count')
     if len(tokens) != 1 or not tokens[0].isdigit() or int(tokens[0]) < 1:
         raise ValueError(f'line {no}: point count must be a positive integer')
     n = int(tokens[0])
     points, weights, weighted = [], [], None
     for i in range(n):
-        no, tokens = take(f'point {i + 1} of {n}')
+        no, tokens = p.take(f'point {i + 1} of {n}')
         if weighted is None:
             if len(tokens) not in (d, d + 1):
                 raise ValueError(f'line {no}: expected {d} coordinates (optionally + weight), '
                                  f'got {len(tokens)} numbers')
             weighted = len(tokens) == d + 1
         what = f'{d} coordinates + weight' if weighted else f'{d} coordinates'
-        vals = numbers(no, tokens, d + 1 if weighted else d, what)
+        vals = p.numbers(no, tokens, d + 1 if weighted else d, what)
         points.append(vals[:d])
         weights.append(vals[d] if weighted else 0.0)
-    if pos < len(lines):
-        raise ValueError(f'line {lines[pos][0]}: unexpected content after the points')
+    p.done('points')
 
     return {'d': d, 'U': U, 'points': np.array(points).T,
             'weights': np.array(weights), 'coordinates': coordinates}
+
+
+def _parse_grid_text(text):
+    """Parse the native 'periodica grid' v1 text format.
+
+    Sections in fixed order: grid (version) / dimension / lattice / shape /
+    values. values[i1,...,id] is the function value at the fractional grid
+    point (i1/N1, ..., id/Nd); value rows are in C order (first index
+    slowest), one row of the last axis (Nd numbers) per line. '#' comments
+    and blank lines are ignored.
+
+    Returns a dict: d, U (d x d, columns = lattice vectors),
+    values ((N1,...,Nd) array).
+    """
+    p = _SectionParser(text)
+    p.magic('grid:', 'grid')
+    d = p.dimension()
+    U = p.lattice(d)
+
+    p.header('shape:')
+    no, tokens = p.take('grid shape')
+    if len(tokens) != d or not all(t.isdigit() and int(t) >= 1 for t in tokens):
+        raise ValueError(f'line {no}: shape must be {d} positive integers')
+    N = tuple(int(t) for t in tokens)
+
+    p.header('values:')
+    n_rows = int(np.prod(N[:-1]))
+    rows = []
+    for i in range(n_rows):
+        no, tokens = p.take(f'value row {i + 1} of {n_rows}')
+        rows.append(p.numbers(no, tokens, N[-1], f'{N[-1]} values'))
+    p.done('values')
+
+    return {'d': d, 'U': U, 'values': np.array(rows).reshape(N)}
 
 class Periodica:
     # Stand-in for symbolic perturbation: exactly degenerate inputs (e.g.
@@ -261,6 +318,7 @@ class Periodica:
         U = np.asarray(U, dtype=float)
         if U.shape != (d, d) or abs(np.linalg.det(U)) < 1e-12:
             raise Exception(f'U must be a non-singular {d}x{d} matrix')
+        self.grid_values = values  # kept for save_grid
         N = np.array(values.shape)
 
         # directions: obtuse superbase of the fine lattice in integer grid
@@ -313,6 +371,28 @@ class Periodica:
         for attr in ('tree', 'bcodes', 'persistence_images'):
             if hasattr(self, attr):
                 delattr(self, attr)
+
+    def load_grid(self, file):
+        """Load a native 'periodica grid' text file (see examples/grid_*.txt)
+        and build its quotient complex via periodic_grid."""
+        with open(file, 'r') as f:
+            g = _parse_grid_text(f.read())
+        self.periodic_grid(g['U'], g['values'])
+
+    def save_grid(self, file):
+        """Write the current grid input (lattice + scalar field) as a grid file."""
+        if not hasattr(self, 'grid_values'):
+            raise Exception('No grid input')
+        values = self.grid_values
+        U = np.asarray(self.U, dtype=float)
+        lines = ['grid:', '1', 'dimension:', str(values.ndim), 'lattice:',
+                 '# matrix U printed row by row; the lattice vectors are its COLUMNS']
+        lines += [' '.join(repr(float(v)) for v in row) for row in U]
+        lines += ['shape:', ' '.join(str(n) for n in values.shape), 'values:']
+        lines += [' '.join(repr(float(v)) for v in row)
+                  for row in values.reshape(-1, values.shape[-1])]
+        with open(file, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
 
     def load_point_set(self, file):
         pass

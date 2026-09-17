@@ -1,0 +1,17 @@
+# 2D grid example: identity lattice, single minimum at (0, 0); the component
+# wraps horizontally at 0.2 (through row 0) and vertically at 0.6 (through
+# column 0)
+grid:
+1
+dimension:
+2
+lattice:
+# matrix U printed row by row; the lattice vectors are its COLUMNS
+1 0
+0 1
+shape:
+3 3
+values:
+0.0 0.1 0.2
+0.5 0.8 0.85
+0.6 0.87 0.9
