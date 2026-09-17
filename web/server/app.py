@@ -82,6 +82,44 @@ def polytope(d, vertices):
     return polytope_2d(vertices) if d == 2 else polytope_3d(vertices)
 
 
+def encode_bar(bar):
+    birth, death, multiplicity = bar
+    return {
+        'birth': float(birth),
+        'death': None if np.isinf(death) else float(death),  # JSON has no Infinity
+        'multiplicity': float(multiplicity),
+    }
+
+
+def encode_tree(tree):
+    # merge tree as event beams: per quotient vertex a time-sorted list of
+    # (time, coeff, exponent, child) — child -1 = plain monomial event,
+    # child == beam index = own death, else id of the beam merging in.
+    return [
+        [[None if np.isinf(t) else float(t), float(c), int(e), int(ch)]
+         for (t, c, e, ch) in beam]
+        for beam in tree
+    ]
+
+
+def encode_descriptors(barcodes, images, tree, image_size):
+    # x-range of the persistence images, matching Periodica.images();
+    # a dimension can have no bars at all (e.g. dim 0 of a Voronoi complex)
+    xmin = min(min(bar[0] for bar in bars) for bars in barcodes if bars)
+    xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes if bars)
+    xspan = xmax - xmin
+    return {
+        'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
+        'images': {
+            'size': image_size,
+            'xmin': float(xmin - 0.12 * xspan),
+            'xmax': float(xmax + 0.12 * xspan),
+            'data': [np.asarray(img).tolist() for img in images],
+        },
+        'tree': encode_tree(tree),
+    }
+
+
 @app.post('/api/compute')
 def compute(req: ComputeRequest):
     d = req.d
@@ -149,41 +187,6 @@ def compute(req: ComputeRequest):
     # and can all be negative with large weights, so use the magnitudes.
     max_radius = max((abs(f) for f in finite_filtrations), default=1.0) or 1.0
 
-    def encode_bar(bar):
-        birth, death, multiplicity = bar
-        return {
-            'birth': float(birth),
-            'death': None if np.isinf(death) else float(death),  # JSON has no Infinity
-            'multiplicity': float(multiplicity),
-        }
-
-    def encode_tree(tree):
-        # merge tree as event beams: per quotient vertex a time-sorted list of
-        # (time, coeff, exponent, child) — child -1 = plain monomial event,
-        # child == beam index = own death, else id of the beam merging in.
-        return [
-            [[None if np.isinf(t) else float(t), float(c), int(e), int(ch)]
-             for (t, c, e, ch) in beam]
-            for beam in tree
-        ]
-
-    def encode_descriptors(barcodes, images, tree):
-        # x-range of the persistence images, matching Periodica.images();
-        # a dimension can have no bars at all (e.g. dim 0 of a Voronoi complex)
-        xmin = min(min(bar[0] for bar in bars) for bars in barcodes if bars)
-        xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes if bars)
-        xspan = xmax - xmin
-        return {
-            'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
-            'images': {
-                'size': req.imageSize,
-                'xmin': float(xmin - 0.12 * xspan),
-                'xmax': float(xmax + 0.12 * xspan),
-                'data': [np.asarray(img).tolist() for img in images],
-            },
-            'tree': encode_tree(tree),
-        }
-
     # Voronoi descriptors + scene geometry from a single periodic_voronoi call
     # (circumcenter cell centers); failures don't break the response.
     voronoi = None
@@ -202,7 +205,7 @@ def compute(req: ComputeRequest):
         q.quotient_arc_filtration = pv_ef
         q.quotient_arc_shift = pv_shift
         q.merge_tree()
-        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize), q.tree)
+        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize), q.tree, req.imageSize)
 
         # geometry overlay, mirroring plot_voronoi
         vor_pts, vor_edges = _periodica.full_voronoi(U, points, weights, True)
@@ -232,7 +235,7 @@ def compute(req: ComputeRequest):
     except Exception as e:
         voronoi_error = str(e)
 
-    delaunay_desc = encode_descriptors(barcodes, images, p.tree)
+    delaunay_desc = encode_descriptors(barcodes, images, p.tree, req.imageSize)
 
     return {
         'voronoi': voronoi,
@@ -260,6 +263,64 @@ def compute(req: ComputeRequest):
         'barcodes': delaunay_desc['barcodes'],
         'images': delaunay_desc['images'],
         'tree': delaunay_desc['tree'],
+    }
+
+
+class GridComputeRequest(BaseModel):
+    lattice: list[list[float]]
+    values: list  # rectangular nested list of floats, 2D or 3D
+    imageSize: int = Field(default=100, ge=10, le=400)
+
+
+@app.post('/api/compute_grid')
+def compute_grid(req: GridComputeRequest):
+    try:
+        values = np.array(req.values, dtype=float)
+    except ValueError:
+        raise HTTPException(400, 'values must be a rectangular 2D or 3D array of numbers')
+    d = values.ndim
+    if d not in (2, 3):
+        raise HTTPException(400, 'values must be a 2D or 3D array')
+    U = np.array(req.lattice, dtype=float)
+    if U.shape != (d, d):
+        raise HTTPException(400, f'lattice must be {d}x{d}')
+    if abs(np.linalg.det(U)) < 1e-12:
+        raise HTTPException(400, 'lattice basis is singular')
+
+    p = Periodica()
+    try:
+        p.periodic_grid(U, values)
+        p.merge_tree()
+        barcodes = p.barcodes()
+        images = p.images(req.imageSize)
+        V = _periodica.reduced_basis(U)
+        A, b = _periodica.dirichlet_domain(V)
+    except Exception as e:
+        raise HTTPException(400, f'computation failed: {e}')
+
+    desc = encode_descriptors(barcodes, images, p.tree, req.imageSize)
+    # Same response shape as /api/compute so the descriptor panels work
+    # unchanged; the point-set geometry fields stay empty (the scene shows
+    # just the cell — grid visualization is a separate step).
+    return {
+        'voronoi': None,
+        'voronoiError': None,
+        'voronoiGeometry': None,
+        'd': d,
+        'basis': V[:, :d].T.tolist(),
+        'domain1x': polytope(d, p.domain_vertices(A, b)),
+        'domain3x': polytope(d, p.domain_vertices(A, b * 3)),
+        'domainA': A.tolist(),
+        'domainB': b.reshape(-1).tolist(),
+        'points': {'positions3x': [], 'originalIndex': [], 'canonicalCount': 0,
+                   'kept': [], 'hidden': [], 'weights': []},
+        'fullEdges': [],
+        'quotientArcs': [],
+        'maxRadius': float(np.abs(values).max()) or 1.0,
+        'grid': {'shape': list(values.shape)},
+        'barcodes': desc['barcodes'],
+        'images': desc['images'],
+        'tree': desc['tree'],
     }
 
 

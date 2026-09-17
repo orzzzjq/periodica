@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { saveFile } from '../capture'
-import { parseGeometry, serializeGeometry } from '../geometry'
+import { gridShape, parseInputFile, serializeGeometry, serializeGrid } from '../geometry'
 import { useStore } from '../store'
 
 function Num({ value, onChange, step = 0.05, min, style }: {
@@ -46,6 +46,8 @@ export default function ControlPanel() {
   const removePoint = useStore((s) => s.removePoint)
   const applyRandom = useStore((s) => s.applyRandom)
   const loadGeometry = useStore((s) => s.loadGeometry)
+  const loadGrid = useStore((s) => s.loadGrid)
+  const gridValues = useStore((s) => s.gridValues)
   const hasGeometry = useStore((s) => s.hasGeometry)
   const setDimension = useStore((s) => s.setDimension)
   const setCoordMode = useStore((s) => s.setCoordMode)
@@ -71,18 +73,21 @@ export default function ControlPanel() {
   const [fileError, setFileError] = useState<string | null>(null)
   const loadFile = async (file: File) => {
     try {
-      const g = parseGeometry(await file.text())
+      const parsed = parseInputFile(await file.text())
       setRandomCfg(null) // a live Random preset would regenerate over the loaded data
-      loadGeometry(g)
+      if (parsed.kind === 'grid') loadGrid(parsed)
+      else loadGeometry(parsed)
       setFileError(null)
     } catch (e) {
       setFileError(e instanceof Error ? e.message : String(e))
     }
   }
-  const saveGeometryFile = async () => {
+  const saveInputFile = async () => {
     try {
-      const blob = new Blob([serializeGeometry(inputs)], { type: 'text/plain' })
-      await saveFile('geometry.txt', blob)
+      const [name, text] = gridValues
+        ? ['grid.txt', serializeGrid({ lattice: inputs.lattice, values: gridValues })]
+        : ['geometry.txt', serializeGeometry(inputs)]
+      await saveFile(name, new Blob([text], { type: 'text/plain' }))
     } catch (e) {
       setFileError(e instanceof Error ? e.message : String(e))
     }
@@ -97,9 +102,9 @@ export default function ControlPanel() {
             Load
           </button>
           <button
-            onClick={saveGeometryFile}
+            onClick={saveInputFile}
             disabled={!hasGeometry}
-            title="save the current input as a geometry file"
+            title="save the current input as a geometry/grid file"
           >
             Save
           </button>
@@ -194,7 +199,21 @@ export default function ControlPanel() {
         </section>
       )}
 
-      {hasGeometry && (
+      {gridValues && (
+        <section>
+          <h2>Grid values</h2>
+          <div className="row">
+            {gridShape(gridValues).join(' × ')} field, values in [
+            {(() => {
+              const flat = gridValues.flat(2) as number[]
+              return `${Math.min(...flat)}, ${Math.max(...flat)}`
+            })()}
+            ] (from file)
+          </div>
+        </section>
+      )}
+
+      {hasGeometry && !gridValues && (
         <section>
           <h2
             className="collapsible"

@@ -1,8 +1,16 @@
+import type { GridValues } from './geometry'
+
 export interface ComputeRequest {
   d: 2 | 3
   lattice: number[][]
   points: number[][] // n rows of d coordinates
   weights: number[]
+  imageSize?: number
+}
+
+export interface GridComputeRequest {
+  lattice: number[][]
+  values: GridValues
   imageSize?: number
 }
 
@@ -93,6 +101,8 @@ export interface ComputeResponse {
   fullEdges: number[][] // index pairs into positions3x
   quotientArcs: QuotientArc[]
   maxRadius: number
+  // present iff the result came from a grid input (point-set fields empty)
+  grid?: { shape: number[] } | null
   barcodes: Bar[][] // d+1 lists (Delaunay)
   images: ImagesData // (Delaunay)
   tree: TreeEvent[][] // (Delaunay)
@@ -113,22 +123,30 @@ export function inDirichletDomain(
   })
 }
 
-export async function compute(req: ComputeRequest): Promise<ComputeResponse> {
-  const res = await fetch('/api/compute', {
+async function postJson(url: string, body: unknown): Promise<ComputeResponse> {
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
     try {
-      const body = await res.json()
-      if (typeof body.detail === 'string') detail = body.detail
-      else detail = JSON.stringify(body.detail ?? body)
+      const payload = await res.json()
+      if (typeof payload.detail === 'string') detail = payload.detail
+      else detail = JSON.stringify(payload.detail ?? payload)
     } catch {
       /* keep default */
     }
     throw new Error(detail)
   }
   return res.json()
+}
+
+export function compute(req: ComputeRequest): Promise<ComputeResponse> {
+  return postJson('/api/compute', req)
+}
+
+export function computeGrid(req: GridComputeRequest): Promise<ComputeResponse> {
+  return postJson('/api/compute_grid', req)
 }

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { compute, type ComputeResponse } from './api'
+import { compute, computeGrid, type ComputeResponse } from './api'
+import type { GridFile, GridValues } from './geometry'
 import { DEFAULT_PRESET } from './presets'
 
 export interface TreeViewState {
@@ -63,9 +64,13 @@ interface State {
   error: string | null
   // inputs changed since the last compute (highlights the Compute button)
   dirty: boolean
-  // false until a geometry file is loaded or a random input is generated;
-  // the lattice/points sections stay hidden and nothing is computed before
+  // false until a geometry/grid file is loaded or a random input is
+  // generated; the lattice/points sections stay hidden and nothing is
+  // computed before
   hasGeometry: boolean
+  // non-null = grid mode: the input is a scalar field on a periodic grid
+  // (loaded from a grid file) and Compute goes to /api/compute_grid
+  gridValues: GridValues | null
   ui: UiState
   setUi: (partial: Partial<UiState>) => void
   computeNow: () => void
@@ -76,6 +81,7 @@ interface State {
   removePoint: (row: number) => void
   applyRandom: (seed: number, nPoints: number) => void
   loadGeometry: (g: Inputs) => void
+  loadGrid: (g: GridFile) => void
   setDimension: (d: 2 | 3) => void
   setCoordMode: (mode: 'fractional' | 'real') => void
 }
@@ -138,17 +144,23 @@ function toRealPoints(inputs: Inputs): number[][] {
 function scheduleRecompute(get: () => State, set: (partial: Partial<State>) => void, delayMs = 300) {
   clearTimeout(debounceTimer)
   debounceTimer = setTimeout(async () => {
-    const { inputs, ui } = get()
+    const { inputs, ui, gridValues } = get()
     const seq = ++requestSeq
     set({ status: 'loading' })
     try {
-      const results = await compute({
-        d: inputs.d,
-        lattice: inputs.lattice,
-        points: toRealPoints(inputs),
-        weights: inputs.weights,
-        imageSize: ui.imageSize,
-      })
+      const results = gridValues
+        ? await computeGrid({
+            lattice: inputs.lattice,
+            values: gridValues,
+            imageSize: ui.imageSize,
+          })
+        : await compute({
+            d: inputs.d,
+            lattice: inputs.lattice,
+            points: toRealPoints(inputs),
+            weights: inputs.weights,
+            imageSize: ui.imageSize,
+          })
       if (seq !== requestSeq) return // a newer request superseded this one
       set({ results, status: 'idle', error: null })
     } catch (e) {
@@ -178,6 +190,7 @@ export const useStore = create<State>((set, get) => {
     error: null,
     dirty: false,
     hasGeometry: false,
+    gridValues: null,
     ui: {
       radius: 0,
       // -Infinity = "at the slider minimum" (the actual minimum depends on
@@ -270,7 +283,12 @@ export const useStore = create<State>((set, get) => {
         weights: [...g.weights],
         coordMode: g.coordMode,
       }))
-      set({ hasGeometry: true })
+      set({ hasGeometry: true, gridValues: null })
+    },
+
+    loadGrid: (g) => {
+      update((inp) => ({ ...inp, d: g.d, lattice: g.lattice.map((r) => [...r]) }))
+      set({ hasGeometry: true, gridValues: g.values })
     },
 
     applyRandom: (seed, nPoints) => {
@@ -279,7 +297,7 @@ export const useStore = create<State>((set, get) => {
         // random points are fractional by construction
         return { ...inp, ...randomGeometry(inp.d, seed, n), coordMode: 'fractional' as const }
       })
-      set({ hasGeometry: true })
+      set({ hasGeometry: true, gridValues: null })
     },
 
     setDimension: (d) => {
@@ -292,6 +310,7 @@ export const useStore = create<State>((set, get) => {
         points: [new Array(d).fill(0.5)],
         weights: [0],
       }))
+      set({ gridValues: null }) // back to point-set mode
     },
 
     setCoordMode: (mode) => {
