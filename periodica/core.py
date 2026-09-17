@@ -241,6 +241,79 @@ class Periodica:
         # print(f'arc filtration:\n{self.quotient_arc_filtration}')
         # print(f'arc shift:\n{self.quotient_arc_shift}')
 
+    @timing
+    def periodic_grid(self, U, values):
+        """Quotient complex of a uniform periodic grid with a scalar field.
+
+        values[i1,...,id] is the function value at the fractional grid point
+        (i1/N1, ..., id/Nd) of the lattice U (columns = vectors), with
+        (N1,...,Nd) = values.shape. Every grid point is connected along the
+        d shortest linearly independent directions of the fine grid lattice
+        W = U diag(1/N) (found via the Selling superbase, so for a skewed
+        cell the arcs need not follow the grid axes); arcs wrapping around
+        the unit cell carry the corresponding lattice shift. Arc filtration
+        is lower-star: the maximum of the endpoint values.
+        """
+        values = np.asarray(values, dtype=float)
+        d = values.ndim
+        if d not in (2, 3):
+            raise Exception('values must be a 2D or 3D array')
+        U = np.asarray(U, dtype=float)
+        if U.shape != (d, d) or abs(np.linalg.det(U)) < 1e-12:
+            raise Exception(f'U must be a non-singular {d}x{d} matrix')
+        N = np.array(values.shape)
+
+        # directions: obtuse superbase of the fine lattice in integer grid
+        # coordinates; the Voronoi-relevant classes are the nonempty subset
+        # sums of the first d superbase vectors. Greedily take the shortest
+        # rank-increasing d of them (the d shortest alone can be coplanar,
+        # e.g. for a flat fine lattice from anisotropic N).
+        W = U @ np.diag(1.0 / N)
+        _, T = _periodica.reduced_basis_coeffs(W)
+        classes = []
+        for mask in range(1, 1 << d):
+            c = sum(T[:, i] for i in range(d) if mask & (1 << i))
+            classes.append(c)
+        classes.sort(key=lambda c: np.linalg.norm(W @ c))
+        D = np.zeros((d, 0), dtype=int)
+        for c in classes:
+            cand = np.column_stack([D, c])
+            if np.linalg.matrix_rank(cand) == cand.shape[1]:
+                D = cand
+                if D.shape[1] == d:
+                    break
+        assert abs(round(np.linalg.det(D.astype(float)))) == 1, \
+            'grid directions do not form a lattice basis'
+        self.grid_directions = D
+
+        # arcs: one per grid point and direction; wrapping indices fold back
+        # modulo N and contribute the lattice shift (floor quotient)
+        idx = np.indices(values.shape).reshape(d, -1)
+        src = np.ravel_multi_index(idx, values.shape)
+        f = values.ravel()
+        arcs, shifts, arc_f = [], [], []
+        for k in range(d):
+            tgt = idx + D[:, k][:, None]
+            shifts.append(tgt // N[:, None])
+            tgt_id = np.ravel_multi_index(tgt % N[:, None], values.shape)
+            arcs.append(np.column_stack([src, tgt_id]))
+            arc_f.append(np.maximum(f[src], f[tgt_id]))
+
+        self.d = d
+        self.U = U
+        # merge_tree interprets shifts in the columns of V, and grid shifts
+        # are in U-coordinates: pass U itself, NOT reduced_basis(U)
+        self.V = U
+        self.n_quotient_vertices = int(N.prod())
+        self.quotient_vertex_filtration = f
+        self.quotient_arcs = np.vstack(arcs)
+        self.quotient_arc_filtration = np.concatenate(arc_f)
+        self.quotient_arc_shift = np.hstack(shifts)
+        # stale downstream results from a previous complex on this instance
+        for attr in ('tree', 'bcodes', 'persistence_images'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+
     def load_point_set(self, file):
         pass
 
