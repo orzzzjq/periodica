@@ -200,7 +200,9 @@ function BarcodePlots({
   return (
     <>
       {dims.map((i, pos) => {
-        const bars = barcodes[i]
+        // zero-length bars (every non-minimum vertex of a lower-star grid
+        // filtration) carry no information and would flood the plot
+        const bars = barcodes[i].filter((b) => b.death === null || b.death > b.birth)
         const traces: Data[] = bars.map((b, j) => ({
           x: [b.birth, b.death ?? xmax],
           y: [-j, -j],
@@ -258,7 +260,8 @@ function DiagramPlots({
     <>
       {dims.map((i, pos) => {
         const bars = barcodes[i]
-        const finite = bars.filter((b) => b.death !== null)
+        // skip zero-persistence points on the diagonal (see BarcodePlots)
+        const finite = bars.filter((b) => b.death !== null && b.death > b.birth)
         const infinite = bars.filter((b) => b.death === null)
         const traces: Data[] = [
           {
@@ -510,7 +513,11 @@ interface TreeBranch {
 // first) stack their subtrees above it. Every branch in an earlier-merging
 // subtree is dead before a later sibling's merge time, so the later
 // sibling's vertical connector crosses no live line.
-function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
+function layoutTree(tree: TreeEvent[][]): {
+  branches: TreeBranch[]
+  // trivial vertices per absorbing beam id, for the subtree filter
+  absorbed: Map<number, { id: number; t: number }[]>
+} {
   const n = tree.length
   const parent = new Array<number>(n).fill(-1)
   const death = new Array<number | null>(n).fill(null)
@@ -524,6 +531,26 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
       }
     }
   }
+
+  // Beams absorbed at their own birth with no children are pure bookkeeping
+  // (every non-minimum vertex of a lower-star grid filtration): exclude them
+  // from the drawn tree — 10^4 of them would otherwise each take a row —
+  // but remember who absorbed them so the subtree filter still publishes
+  // their quotient vertices.
+  const trivial = new Array<boolean>(n).fill(false)
+  const absorbed = new Map<number, { id: number; t: number }[]>()
+  for (let i = 0; i < n; i++) {
+    const birth = tree[i][0]?.[0]
+    const d = death[i]
+    if (children[i].length === 0 && parent[i] !== -1 && d !== null && d === birth) {
+      trivial[i] = true
+      const list = absorbed.get(parent[i]) ?? []
+      list.push({ id: i, t: d })
+      absorbed.set(parent[i], list)
+    }
+  }
+  for (let k = 0; k < n; k++) children[k] = children[k].filter((c) => !trivial[c.id])
+
   const rows = new Array<number>(n).fill(0)
   const subRows = new Array<number>(n).fill(1)
   const subMin = new Array<number>(n).fill(Infinity)
@@ -546,10 +573,12 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
   const branches: TreeBranch[] = []
   for (let i = 0; i < n; i++) {
     const beam = tree[i]
-    if (beam.length === 0) continue
+    if (beam.length === 0 || trivial[i]) continue
     const raw: { t: number; coeff: number; exp: number }[] = []
     for (const [t, coeff, exp, child] of beam) {
       if (child === i || t === null) continue // own death: monomial unchanged
+      // absorbing a trivial vertex leaves the monomial unchanged: no tick
+      if (child !== -1 && trivial[child]) continue
       raw.push({ t, coeff, exp })
     }
     // Several monomial changes can happen at the same time (up to fp noise);
@@ -582,7 +611,7 @@ function layoutTree(tree: TreeEvent[][]): TreeBranch[] {
       events,
     })
   }
-  return branches
+  return { branches, absorbed }
 }
 
 function MergeTreePlot({
@@ -603,7 +632,7 @@ function MergeTreePlot({
   showLabels: boolean
 }) {
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
-  const branches = useMemo(() => layoutTree(tree), [tree])
+  const { branches, absorbed } = useMemo(() => layoutTree(tree), [tree])
   const maxRow = branches.reduce((m, b) => Math.max(m, b.row), 0)
 
   // interactive view: null = full tree; clicking a hover point zooms to the
@@ -676,8 +705,14 @@ function MergeTreePlot({
     }
     const verts = [anchor.id]
     for (const b of branches) if (included.has(b.row)) verts.push(b.id)
+    // trivial vertices absorbed into the component's branches by time t
+    // (only the anchor can still absorb after t; included branches are dead)
+    const eps = 1e-9 * Math.max(1, Math.abs(sub.t))
+    for (const id of [...verts]) {
+      for (const a of absorbed.get(id) ?? []) if (a.t <= sub.t + eps) verts.push(a.id)
+    }
     setUi({ subtreeFilter: { complex: which, verts } })
-  }, [sub, anchor, included, branches, which, setUi])
+  }, [sub, anchor, included, branches, absorbed, which, setUi])
 
   interface DrawGroup {
     lx: (number | null)[]

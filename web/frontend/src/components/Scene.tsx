@@ -294,32 +294,87 @@ function valueColor(v: number, min: number, max: number): string {
 
 // Grid points colored by function value; points not yet in the sublevel set
 // (value > f) are ghosted, as are points outside a picked merge-tree subtree.
+//
+// Two instanced meshes sharing one instance ordering (ascending by value,
+// subtree-excluded points last): the opaque mesh draws the first k born
+// instances, the ghost mesh holds the same instances REVERSED and draws the
+// remaining n-k — a slider tick only changes two instance counts, mirroring
+// PrefixSegments (fine grids have ~10^5 copies in the 3x domain).
 function GridPoints({ results, radius }: { results: ComputeResponse; radius: number }) {
   const g = results.grid
   const verts = useSubtreeVerts('delaunay')
-  const range = useMemo(() => {
-    if (!g) return [0, 1]
-    return [Math.min(...g.values), Math.max(...g.values)]
-  }, [g])
-  if (!g) return null
+  const bornRef = useRef<THREE.InstancedMesh>(null)
+  const ghostRef = useRef<THREE.InstancedMesh>(null)
+
+  const built = useMemo(() => {
+    if (!g) return null
+    const vmin = Math.min(...g.values)
+    const vmax = Math.max(...g.values)
+    // born threshold key: excluded-from-subtree points never turn opaque
+    const key = (i: number) => {
+      const orig = g.originalIndex[i]
+      return verts && !verts.has(orig) ? Infinity : g.values[orig]
+    }
+    const order = Array.from({ length: g.positions3x.length }, (_, i) => i)
+    order.sort((a, b) => key(a) - key(b))
+    return { order, sortedKeys: order.map(key), vmin, vmax }
+  }, [g, verts])
+
+  // fill both instance buffers once per (results, subtree) change
+  useEffect(() => {
+    if (!built || !g || !bornRef.current || !ghostRef.current) return
+    const m = new THREE.Matrix4()
+    const color = new THREE.Color()
+    const n = built.order.length
+    for (let k = 0; k < n; k++) {
+      const i = built.order[k]
+      const p = g.positions3x[i]
+      const s = g.canonical[i] ? 0.035 : 0.022
+      m.makeScale(s, s, s).setPosition(p[0], p[1], p[2] ?? 0)
+      color.set(valueColor(g.values[g.originalIndex[i]], built.vmin, built.vmax))
+      bornRef.current.setMatrixAt(k, m)
+      bornRef.current.setColorAt(k, color)
+      ghostRef.current.setMatrixAt(n - 1 - k, m)
+      ghostRef.current.setColorAt(n - 1 - k, color)
+    }
+    for (const ref of [bornRef, ghostRef]) {
+      ref.current!.instanceMatrix.needsUpdate = true
+      ref.current!.instanceColor!.needsUpdate = true
+    }
+  }, [built, g])
+
+  // binary search: instances with value <= threshold are born
   const t = radius + filtEps(radius)
+  let lo = 0
+  let hi = built ? built.sortedKeys.length : 0
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (built!.sortedKeys[mid] <= t) lo = mid + 1
+    else hi = mid
+  }
+  const bornCount = lo
+
+  const n = built ? built.order.length : 0
+  useFrame(() => {
+    if (bornRef.current) bornRef.current.count = bornCount
+    if (ghostRef.current) ghostRef.current.count = n - bornCount
+  })
+
+  if (!built || !g || n === 0) return null
+  // fine grids have ~10^5 instances: flat discs in the 2D ortho view and a
+  // low-poly sphere in 3D keep the triangle count in the low millions
+  const dot = results.d === 2 ? <circleGeometry args={[1, 12]} /> : <sphereGeometry args={[1, 8, 6]} />
   return (
+    // per-instance positions break the default bounding-sphere culling
     <>
-      {g.positions3x.map((p, i) => {
-        const orig = g.originalIndex[i]
-        const v = g.values[orig]
-        const born = v <= t && (!verts || verts.has(orig))
-        return (
-          <mesh key={i} position={to3(p)}>
-            <sphereGeometry args={[g.canonical[i] ? 0.035 : 0.022, 16, 16]} />
-            <meshBasicMaterial
-              color={valueColor(v, range[0], range[1])}
-              transparent={!born}
-              opacity={born ? 1 : 0.2}
-            />
-          </mesh>
-        )
-      })}
+      <instancedMesh key={`born-${n}`} ref={bornRef} args={[undefined, undefined, n]} frustumCulled={false}>
+        {dot}
+        <meshBasicMaterial />
+      </instancedMesh>
+      <instancedMesh key={`ghost-${n}`} ref={ghostRef} args={[undefined, undefined, n]} frustumCulled={false}>
+        {dot}
+        <meshBasicMaterial transparent opacity={0.2} depthWrite={false} />
+      </instancedMesh>
     </>
   )
 }
