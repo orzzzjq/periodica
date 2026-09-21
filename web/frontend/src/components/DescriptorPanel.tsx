@@ -513,9 +513,12 @@ interface TreeBranch {
 // first) stack their subtrees above it. Every branch in an earlier-merging
 // subtree is dead before a later sibling's merge time, so the later
 // sibling's vertical connector crosses no live line.
-function layoutTree(tree: TreeEvent[][]): {
+function layoutTree(
+  tree: TreeEvent[][],
+  minLifetime = 0,
+): {
   branches: TreeBranch[]
-  // trivial vertices per absorbing beam id, for the subtree filter
+  // pruned vertices per absorbing (visible) beam id, for the subtree filter
   absorbed: Map<number, { id: number; t: number }[]>
 } {
   const n = tree.length
@@ -532,24 +535,35 @@ function layoutTree(tree: TreeEvent[][]): {
     }
   }
 
-  // Beams absorbed at their own birth with no children are pure bookkeeping
-  // (every non-minimum vertex of a lower-star grid filtration): exclude them
-  // from the drawn tree — 10^4 of them would otherwise each take a row —
-  // but remember who absorbed them so the subtree filter still publishes
-  // their quotient vertices.
-  const trivial = new Array<boolean>(n).fill(false)
-  const absorbed = new Map<number, { id: number; t: number }[]>()
+  // Prune branches with persistence <= minLifetime. The elder rule makes a
+  // child's persistence at most its parent's, so the pruned set is closed
+  // under taking subtrees: nothing visible ever hangs off a pruned branch.
+  // minLifetime 0 prunes exactly the zero-length bookkeeping beams (every
+  // non-minimum vertex of a lower-star grid filtration — 10^4 of them would
+  // otherwise each take a row). Pruned vertices are recorded per surviving
+  // ancestor so the subtree filter still publishes them: a vertex is in the
+  // ancestor's component from the moment its pruned subtree's root merged
+  // (merge times never decrease toward the root).
+  const pruned = new Array<boolean>(n).fill(false)
   for (let i = 0; i < n; i++) {
     const birth = tree[i][0]?.[0]
     const d = death[i]
-    if (children[i].length === 0 && parent[i] !== -1 && d !== null && d === birth) {
-      trivial[i] = true
-      const list = absorbed.get(parent[i]) ?? []
-      list.push({ id: i, t: d })
-      absorbed.set(parent[i], list)
-    }
+    pruned[i] = parent[i] !== -1 && d !== null && birth != null && d - birth <= minLifetime
   }
-  for (let k = 0; k < n; k++) children[k] = children[k].filter((c) => !trivial[c.id])
+  const absorbed = new Map<number, { id: number; t: number }[]>()
+  for (let i = 0; i < n; i++) {
+    if (!pruned[i] || pruned[parent[i]]) continue
+    // i roots a pruned subtree: attribute all of it to the surviving parent
+    const list = absorbed.get(parent[i]) ?? []
+    const stack = [i]
+    while (stack.length) {
+      const b = stack.pop()!
+      list.push({ id: b, t: death[i] as number })
+      for (const c of children[b]) stack.push(c.id)
+    }
+    absorbed.set(parent[i], list)
+  }
+  for (let k = 0; k < n; k++) children[k] = children[k].filter((c) => !pruned[c.id])
 
   const rows = new Array<number>(n).fill(0)
   const subRows = new Array<number>(n).fill(1)
@@ -573,12 +587,12 @@ function layoutTree(tree: TreeEvent[][]): {
   const branches: TreeBranch[] = []
   for (let i = 0; i < n; i++) {
     const beam = tree[i]
-    if (beam.length === 0 || trivial[i]) continue
+    if (beam.length === 0 || pruned[i]) continue
     const raw: { t: number; coeff: number; exp: number }[] = []
     for (const [t, coeff, exp, child] of beam) {
       if (child === i || t === null) continue // own death: monomial unchanged
-      // absorbing a trivial vertex leaves the monomial unchanged: no tick
-      if (child !== -1 && trivial[child]) continue
+      // absorbing a pruned branch leaves the monomial unchanged: no tick
+      if (child !== -1 && pruned[child]) continue
       raw.push({ t, coeff, exp })
     }
     // Several monomial changes can happen at the same time (up to fp noise);
@@ -614,6 +628,14 @@ function layoutTree(tree: TreeEvent[][]): {
   return { branches, absorbed }
 }
 
+// largest finite persistence over all bars: the range of the Lifetime filter
+function maxFinitePersistence(barcodes: Bar[][]): number {
+  let m = 0
+  for (const bars of barcodes)
+    for (const b of bars) if (b.death !== null) m = Math.max(m, b.death - b.birth)
+  return m || 1
+}
+
 function MergeTreePlot({
   tree,
   barcodes,
@@ -622,6 +644,7 @@ function MergeTreePlot({
   cursor,
   cursorColor,
   showLabels,
+  lifetime,
 }: {
   tree: TreeEvent[][]
   barcodes: Bar[][]
@@ -630,9 +653,10 @@ function MergeTreePlot({
   cursor: number | null
   cursorColor: string
   showLabels: boolean
+  lifetime: number
 }) {
   const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
-  const { branches, absorbed } = useMemo(() => layoutTree(tree), [tree])
+  const { branches, absorbed } = useMemo(() => layoutTree(tree, lifetime), [tree, lifetime])
   const maxRow = branches.reduce((m, b) => Math.max(m, b.row), 0)
 
   // interactive view: null = full tree; clicking a hover point zooms to the
@@ -889,11 +913,16 @@ export function MergeTreePanel() {
   const showLabels = useStore((s) => s.ui.showTreeMultiplicity)
   const setUi = useStore((s) => s.setUi)
   const stack = useStore((s) => s.ui.treeViewStack)
-  // a new tree (recompute, Delaunay/Voronoi switch) invalidates the zoom view
+  // the effective Lifetime filter: the stored value clamped to this tree's
+  // persistence range (kept when switching Delaunay/Voronoi or recomputing)
+  const rawLifetime = useStore((s) => s.ui.treeLifetime)
+  const lifetime = desc ? Math.min(rawLifetime, maxFinitePersistence(desc.barcodes)) : 0
+  // a new tree (recompute, Delaunay/Voronoi switch) or a Lifetime change
+  // invalidates the zoom view: rows and saved y-ranges are re-laid out
   const tree = desc?.tree
   useEffect(() => {
     setUi({ treeView: null, treeViewStack: [], subtreeFilter: null })
-  }, [tree, setUi])
+  }, [tree, lifetime, setUi])
   const which = useStore((s) => s.ui.complexType)
   const goBack = () => {
     if (stack.length === 0) return
@@ -939,6 +968,7 @@ export function MergeTreePanel() {
           cursor={cursor}
           cursorColor={cursorColor}
           showLabels={showLabels}
+          lifetime={lifetime}
         />
       )}
     </div>
@@ -948,8 +978,12 @@ export function MergeTreePanel() {
 // display popup for the merge tree panel header
 export function TreeDisplayOptions() {
   const show = useStore((s) => s.ui.showTreeMultiplicity)
+  const lifetime = useStore((s) => s.ui.treeLifetime)
   const setUi = useStore((s) => s.setUi)
   const [open, setOpen] = useState(false)
+  const { desc } = useDescriptors()
+  const maxP = desc ? maxFinitePersistence(desc.barcodes) : 1
+  const val = Math.min(lifetime, maxP)
   return (
     <div className="popup-control">
       <button className={open ? 'active' : ''} onClick={() => setOpen(!open)}>
@@ -965,6 +999,20 @@ export function TreeDisplayOptions() {
             />
             Multiplicity
           </label>
+          {/* only branches with persistence > Lifetime are drawn */}
+          <div className="row" title="hide branches with persistence up to this value">
+            Lifetime
+            <input
+              type="range"
+              min={0}
+              max={maxP}
+              step={maxP / 200}
+              value={val}
+              style={{ flex: 1, minWidth: 90 }}
+              onChange={(e) => setUi({ treeLifetime: e.target.valueAsNumber })}
+            />
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{val.toFixed(3)}</span>
+          </div>
         </div>
       )}
     </div>

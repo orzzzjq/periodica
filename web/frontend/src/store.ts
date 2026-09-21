@@ -43,6 +43,10 @@ interface UiState {
   vorEdgeOpacity: number // Voronoi filtration edges
   sameRange: boolean
   showTreeMultiplicity: boolean // monomial labels on the merge tree
+  // merge tree display filter: only branches with persistence > treeLifetime
+  // are drawn (0 = just the zero-length bookkeeping beams; essential
+  // branches always stay)
+  treeLifetime: number
   // null = full view; sub = the zoom anchor (time t on branch row): the
   // part of the tree not flowing into that point is dimmed
   treeView: TreeViewState | null
@@ -214,6 +218,7 @@ export const useStore = create<State>((set, get) => {
       vorEdgeOpacity: 1,
       sameRange: true,
       showTreeMultiplicity: true,
+      treeLifetime: 0,
       treeView: null,
       treeViewStack: [],
       subtreeFilter: null,
