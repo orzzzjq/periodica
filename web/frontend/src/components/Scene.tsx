@@ -5,6 +5,13 @@ import * as THREE from 'three'
 import type { Line2 } from 'three-stdlib'
 import { inDirichletDomain, type ComputeResponse, type Polytope2D, type Polytope3D } from '../api'
 import { captureRegistry } from '../capture'
+import {
+  buildGridField,
+  inverse3,
+  labelSublevelComponents,
+  marchingCubes,
+  splitTriangles,
+} from '../marchingCubes'
 import { useStore } from '../store'
 
 const GREEN = '#30b830'
@@ -411,6 +418,204 @@ function GridFiltrationEdges({ results, radius }: { results: ComputeResponse; ra
   }, [results, verts])
   const opacity = useStore((s) => s.ui.filtEdgeOpacity)
   return <PrefixSegments data={data} threshold={radius} color={BLUE} opacity={opacity} />
+}
+
+// VESTA-like gold for the sublevel isosurface
+const ISO_COLOR = '#e0b53c'
+
+// Integer combos z of the reduced-basis rows whose translated U-parallelepiped
+// can intersect the 3x Dirichlet domain. Per-halfspace test with the exact
+// support h_i of the centered cell (min over the cell of A_i·x = A_i·c − h_i),
+// conservative for the intersection — excess copies are cut away by the
+// clipping planes. The translates generate the same lattice as U's columns,
+// so enumerating reduced-basis combos covers every cell copy. 3D only.
+function latticeTranslates3x(results: ComputeResponse, U: number[][]): [number, number, number][] {
+  const { basis, domainA, domainB } = results
+  // cell center c0 = U·(½,½,½) and support along each domain normal:
+  // h_i = ½ Σ_j |A_i · (column j of U)|
+  const c0 = [0, 1, 2].map((r) => 0.5 * (U[r][0] + U[r][1] + U[r][2]))
+  const support = domainA.map(
+    (a) =>
+      0.5 *
+      (Math.abs(a[0] * U[0][0] + a[1] * U[1][0] + a[2] * U[2][0]) +
+        Math.abs(a[0] * U[0][1] + a[1] * U[1][1] + a[2] * U[2][1]) +
+        Math.abs(a[0] * U[0][2] + a[1] * U[1][2] + a[2] * U[2][2])),
+  )
+  // enumeration box: |z_k| from the bounding-sphere reach (loose is fine here)
+  const rCell = Math.hypot(
+    Math.abs(U[0][0]) + Math.abs(U[0][1]) + Math.abs(U[0][2]),
+    Math.abs(U[1][0]) + Math.abs(U[1][1]) + Math.abs(U[1][2]),
+    Math.abs(U[2][0]) + Math.abs(U[2][1]) + Math.abs(U[2][2]),
+  )
+  let R = 0
+  for (const v of results.domain3x.vertices) R = Math.max(R, Math.hypot(v[0], v[1], v[2] ?? 0))
+  const reach = R + rCell + Math.hypot(c0[0], c0[1], c0[2])
+  // translate T = Bᵀz (B rows = basis vectors) ⇒ z = B⁻ᵀT, |z_k| ≤ |col_k(B⁻¹)|·|T|
+  const Binv = inverse3(basis)
+  const zMax = [0, 1, 2].map((k) =>
+    Math.ceil(Math.hypot(Binv[0][k], Binv[1][k], Binv[2][k]) * reach),
+  )
+  const out: [number, number, number][] = []
+  for (let z1 = -zMax[0]; z1 <= zMax[0]; z1++)
+    for (let z2 = -zMax[1]; z2 <= zMax[1]; z2++)
+      for (let z3 = -zMax[2]; z3 <= zMax[2]; z3++) {
+        const cx = c0[0] + z1 * basis[0][0] + z2 * basis[1][0] + z3 * basis[2][0]
+        const cy = c0[1] + z1 * basis[0][1] + z2 * basis[1][1] + z3 * basis[2][1]
+        const cz = c0[2] + z1 * basis[0][2] + z2 * basis[1][2] + z3 * basis[2][2]
+        let keep = true
+        for (let i = 0; i < domainA.length && keep; i++) {
+          const a = domainA[i]
+          if (a[0] * cx + a[1] * cy + a[2] * cz > 3 * domainB[i] + support[i]) keep = false
+        }
+        if (keep) out.push([cx - c0[0], cy - c0[1], cz - c0[2]])
+      }
+  return out
+}
+
+// Sublevel-set isosurface of the grid field at the slider threshold (3D
+// only): marching cubes over the periodic grid in index space, mapped by U,
+// rendered as a glossy surface instanced over the lattice translates that
+// cover the 3x domain and clipped to it by the Dirichlet halfspaces. Under a
+// subtree filter, patches bounding components without a filtered vertex are
+// ghosted (the labeling uses the same arc adjacency as the merge tree).
+function GridIsosurface({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const g = results.grid
+  const is3d = results.d === 3
+  const verts = useSubtreeVerts('delaunay')
+  const opacity = useStore((s) => s.ui.isoOpacity)
+  // the lattice that produced these results (grid geometry is built from U,
+  // not the reduced basis; inputs.lattice may have been edited since)
+  const U = useStore((s) => s.computedLattice)
+  const inclRef = useRef<THREE.InstancedMesh>(null)
+  const ghostRef = useRef<THREE.InstancedMesh>(null)
+
+  const field = useMemo(
+    () => (g && U && is3d ? buildGridField(g.shape, g.values, U) : null),
+    [g, U, is3d],
+  )
+  const sortedArcs = useMemo(
+    () => (g && is3d ? [...g.arcs].sort((a, b) => a.filtration - b.filtration) : []),
+    [g, is3d],
+  )
+  const translates = useMemo(
+    () => (U && is3d ? latticeTranslates3x(results, U) : []),
+    [results, U, is3d],
+  )
+  // keep A·x <= 3b ⇔ (−A_i/|A_i|)·x + 3b_i/|A_i| >= 0 (three clips distance < 0)
+  const planes = useMemo(
+    () =>
+      is3d
+        ? results.domainA.map((row, i) => {
+            const n = Math.hypot(row[0], row[1], row[2])
+            return new THREE.Plane(
+              new THREE.Vector3(-row[0] / n, -row[1] / n, -row[2] / n),
+              (3 * results.domainB[i]) / n,
+            )
+          })
+        : [],
+    [results, is3d],
+  )
+
+  const t = radius + filtEps(radius)
+  const mesh = useMemo(() => (field ? marchingCubes(field, t) : null), [field, t])
+  // component labeling is only needed while a subtree filter is active
+  const roots = useMemo(
+    () => (g && verts ? labelSublevelComponents(sortedArcs, g.values.length, t) : null),
+    [g, sortedArcs, t, verts],
+  )
+  // position/normal attributes are shared by the included and ghost
+  // geometries; a filter change swaps only the index buffers
+  const geos = useMemo(() => {
+    if (!mesh || mesh.triangleCount === 0) return null
+    const pos = new THREE.BufferAttribute(mesh.positions, 3)
+    const nrm = new THREE.BufferAttribute(mesh.normals, 3)
+    const included = new THREE.BufferGeometry()
+    included.setAttribute('position', pos)
+    included.setAttribute('normal', nrm)
+    let ghost: THREE.BufferGeometry | null = null
+    if (verts && roots) {
+      const split = splitTriangles(mesh, roots, verts)
+      if (split.includedIndex) included.setIndex(new THREE.BufferAttribute(split.includedIndex, 1))
+      if (split.ghostIndex.length > 0) {
+        ghost = new THREE.BufferGeometry()
+        ghost.setAttribute('position', pos)
+        ghost.setAttribute('normal', nrm)
+        ghost.setIndex(new THREE.BufferAttribute(split.ghostIndex, 1))
+      }
+    }
+    return { included, ghost }
+  }, [mesh, roots, verts])
+
+  useEffect(() => {
+    if (!geos) return
+    return () => {
+      geos.included.dispose()
+      geos.ghost?.dispose()
+    }
+  }, [geos])
+
+  // instance matrices are pure translations, independent of the threshold;
+  // refilled when the translate list or a mesh (re)mounts
+  const nT = translates.length
+  useEffect(() => {
+    const m = new THREE.Matrix4()
+    for (const ref of [inclRef, ghostRef]) {
+      if (!ref.current) continue
+      for (let i = 0; i < nT; i++) {
+        m.makeTranslation(translates[i][0], translates[i][1], translates[i][2])
+        ref.current.setMatrixAt(i, m)
+      }
+      ref.current.instanceMatrix.needsUpdate = true
+    }
+  }, [translates, nT, geos])
+
+  if (!g || !is3d || !geos || nT === 0) return null
+  return (
+    // renderOrder −1: draw before the other transparents so ghost points and
+    // edge lines composite on top of the surface
+    <>
+      <instancedMesh
+        key={`iso-${nT}`}
+        ref={inclRef}
+        args={[undefined, undefined, nT]}
+        geometry={geos.included}
+        frustumCulled={false}
+        renderOrder={-1}
+      >
+        <meshPhongMaterial
+          color={ISO_COLOR}
+          specular="#777777"
+          shininess={100}
+          side={THREE.DoubleSide}
+          transparent
+          opacity={opacity}
+          depthWrite={opacity > 0.99}
+          clippingPlanes={planes}
+        />
+      </instancedMesh>
+      {geos.ghost && (
+        <instancedMesh
+          key={`iso-ghost-${nT}`}
+          ref={ghostRef}
+          args={[undefined, undefined, nT]}
+          geometry={geos.ghost}
+          frustumCulled={false}
+          renderOrder={-1}
+        >
+          <meshPhongMaterial
+            color={ISO_COLOR}
+            specular="#777777"
+            shininess={100}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={Math.min(0.1, opacity * 0.25)}
+            depthWrite={false}
+            clippingPlanes={planes}
+          />
+        </instancedMesh>
+      )}
+    </>
+  )
 }
 
 const RED = '#dd2222'
@@ -1115,6 +1320,9 @@ export default function Scene() {
       frameloop="demand"
       onCreated={(state) => {
         captureRegistry.r3f = state
+        // the grid isosurface is clipped to the 3x domain by material
+        // clipping planes; set here so it survives the key remount on d change
+        state.gl.localClippingEnabled = true
       }}
     >
       <InvalidateOnChange />
@@ -1154,6 +1362,7 @@ export default function Scene() {
           {ui.showFullSkeleton && <GridSkeleton results={results} />}
           {ui.showFiltrationEdges && <GridFiltrationEdges results={results} radius={ui.radius} />}
           {ui.showPoints && <GridPoints results={results} radius={ui.radius} />}
+          {!is2d && ui.showIsosurface && <GridIsosurface results={results} radius={ui.radius} />}
         </>
       ) : (
         <>
@@ -1194,10 +1403,37 @@ const FILTRATION_TOGGLES = [
   { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
 ] as const
 
+// grid mode renders only points/skeleton/sublevel edges (plus the shared
+// basis and domains), so the popup offers exactly those, with grid wording
+const GRID_DISPLAY_TOGGLES = [
+  { key: 'showBasis', label: 'lattice vectors' },
+  { key: 'showDomains', label: 'Dirichlet domains' },
+  { key: 'showPoints', label: 'grid points' },
+  { key: 'showFullSkeleton', label: 'grid skeleton' },
+] as const
+
+const GRID_FILTRATION_TOGGLES = [
+  { key: 'showFiltrationEdges', label: 'sublevel edges', opacityKey: 'filtEdgeOpacity' },
+] as const
+
+// the isosurface exists only in 3D grid mode
+const GRID_FILTRATION_TOGGLES_3D = [
+  ...GRID_FILTRATION_TOGGLES,
+  { key: 'showIsosurface', label: 'sublevel isosurface', opacityKey: 'isoOpacity' },
+] as const
+
 export function DisplayOptions() {
   const ui = useStore((s) => s.ui)
   const setUi = useStore((s) => s.setUi)
+  const isGrid = useStore((s) => Boolean(s.results?.grid))
+  const is3d = useStore((s) => s.results?.d === 3)
   const [open, setOpen] = useState(false)
+  const displayToggles = isGrid ? GRID_DISPLAY_TOGGLES : DISPLAY_TOGGLES
+  const filtrationToggles = isGrid
+    ? is3d
+      ? GRID_FILTRATION_TOGGLES_3D
+      : GRID_FILTRATION_TOGGLES
+    : FILTRATION_TOGGLES
   return (
     <div className="popup-control">
       <button className={open ? 'active' : ''} onClick={() => setOpen(!open)}>
@@ -1206,7 +1442,7 @@ export function DisplayOptions() {
       {open && (
         <div className="popup-panel popup-columns">
           <div className="popup-col">
-            {DISPLAY_TOGGLES.map(({ key, label }) => (
+            {displayToggles.map(({ key, label }) => (
               <label key={key} className="row">
                 <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />
                 {label}
@@ -1214,7 +1450,7 @@ export function DisplayOptions() {
             ))}
           </div>
           <div className="popup-col">
-            {FILTRATION_TOGGLES.map(({ key, label, opacityKey }) => (
+            {filtrationToggles.map(({ key, label, opacityKey }) => (
               <div key={key}>
                 <label className="row">
                   <input type="checkbox" checked={ui[key]} onChange={(e) => setUi({ [key]: e.target.checked })} />

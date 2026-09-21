@@ -37,6 +37,9 @@ interface UiState {
   showVoronoiArcs: boolean
   showBalls: boolean
   showVoronoiBalls: boolean
+  // grid mode, 3D only: sublevel-set isosurface at the slider threshold
+  showIsosurface: boolean
+  isoOpacity: number
   ballOpacity: number // Delaunay filtration balls
   filtEdgeOpacity: number // Delaunay filtration edges
   coneOpacity: number // Voronoi filtration cones
@@ -64,6 +67,10 @@ interface UiState {
 interface State {
   inputs: Inputs
   results: ComputeResponse | null
+  // the lattice that produced `results` (inputs.lattice can be edited into a
+  // dirty state while stale results are still displayed); grid overlays that
+  // need U (not the reduced basis) read this snapshot
+  computedLattice: number[][] | null
   status: 'idle' | 'loading' | 'error'
   error: string | null
   // inputs changed since the last compute (highlights the Compute button)
@@ -166,7 +173,12 @@ function scheduleRecompute(get: () => State, set: (partial: Partial<State>) => v
             imageSize: ui.imageSize,
           })
       if (seq !== requestSeq) return // a newer request superseded this one
-      set({ results, status: 'idle', error: null })
+      set({
+        results,
+        computedLattice: inputs.lattice.map((r) => [...r]),
+        status: 'idle',
+        error: null,
+      })
     } catch (e) {
       if (seq !== requestSeq) return
       set({ status: 'error', error: e instanceof Error ? e.message : String(e) })
@@ -190,6 +202,7 @@ export const useStore = create<State>((set, get) => {
       coordMode: 'fractional',
     },
     results: null,
+    computedLattice: null,
     status: 'idle',
     error: null,
     dirty: false,
@@ -212,6 +225,8 @@ export const useStore = create<State>((set, get) => {
       showVoronoiArcs: true,
       showBalls: true,
       showVoronoiBalls: true,
+      showIsosurface: true,
+      isoOpacity: 0.6,
       ballOpacity: 0.35,
       filtEdgeOpacity: 1,
       coneOpacity: 0.35,
