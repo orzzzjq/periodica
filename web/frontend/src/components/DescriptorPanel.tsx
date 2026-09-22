@@ -389,13 +389,24 @@ function useDescriptors(): { desc: Descriptors | null; error: string | null } {
   const which = useStore((s) => s.ui.complexType)
   if (!results) return { desc: null, error: null }
   if (which === 'voronoi') {
-    return { desc: results.voronoi, error: results.voronoi ? null : (results.voronoiError ?? 'Voronoi unavailable') }
+    // grid mode: the voronoi slot carries the superlevel descriptors
+    const label = results.grid ? 'Superlevel' : 'Voronoi'
+    return {
+      desc: results.voronoi,
+      error: results.voronoi ? null : (results.voronoiError ?? `${label} unavailable`),
+    }
   }
   return { desc: { barcodes: results.barcodes, images: results.images, tree: results.tree }, error: null }
 }
 
 function DescError({ error }: { error: string | null }) {
-  return error ? <div className="desc-error">Voronoi computation failed: {error}</div> : null
+  const isGrid = useStore((s) => Boolean(s.results?.grid))
+  if (!error) return null
+  return (
+    <div className="desc-error">
+      {isGrid ? 'Superlevel' : 'Voronoi'} computation failed: {error}
+    </div>
+  )
 }
 
 // Filtration cursor for the active complex: f_Del (blue) or f_Vor (red),

@@ -126,8 +126,9 @@ coefficients (real = U·p).
 ## Grid file format (`examples/grid_*.txt`)
 
 Native input (v1) for a periodic scalar field on a uniform fractional grid, consumed by
-`Periodica.load_grid` / `save_grid` → `periodic_grid(U, values)` (grid quotient complex
-with lower-star filtration; same lexical rules and lattice convention as above):
+`Periodica.load_grid` / `save_grid` → `periodic_grid(U, values, sublevel=True)` (grid
+quotient complex with lower-star filtration; `sublevel=False` builds it on the negated
+field, i.e. analyzes superlevel sets; same lexical rules and lattice convention as above):
 
 ```
 grid:

@@ -299,7 +299,7 @@ class Periodica:
         # print(f'arc shift:\n{self.quotient_arc_shift}')
 
     @timing
-    def periodic_grid(self, U, values):
+    def periodic_grid(self, U, values, sublevel=True):
         """Quotient complex of a uniform periodic grid with a scalar field.
 
         values[i1,...,id] is the function value at the fractional grid point
@@ -310,6 +310,11 @@ class Periodica:
         cell the arcs need not follow the grid axes); arcs wrapping around
         the unit cell carry the corresponding lattice shift. Arc filtration
         is lower-star: the maximum of the endpoint values.
+
+        With sublevel=False the complex is built on the NEGATED field
+        (vertex filtration -f, arc filtration max(-f_u, -f_v)), so the
+        merge tree analyzes superlevel sets of f. grid_values keeps the
+        raw input either way (save_grid round-trips the original field).
         """
         values = np.asarray(values, dtype=float)
         d = values.ndim
@@ -348,7 +353,8 @@ class Periodica:
         # modulo N and contribute the lattice shift (floor quotient)
         idx = np.indices(values.shape).reshape(d, -1)
         src = np.ravel_multi_index(idx, values.shape)
-        f = values.ravel()
+        # negate BEFORE the lower-star max: max(-f_u, -f_v) = -min(f_u, f_v)
+        f = (values if sublevel else -values).ravel()
         arcs, shifts, arc_f = [], [], []
         for k in range(d):
             tgt = idx + D[:, k][:, None]

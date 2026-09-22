@@ -242,6 +242,65 @@ def test_invariants():
     print('PASS arc bookkeeping invariants (3D skewed)')
 
 
+# ---- 7. superlevel mode (sublevel=False) ----
+
+def test_superlevel():
+    import tempfile
+
+    rng = np.random.default_rng(7)
+    U = np.array([[1.0, 0.3], [0.0, 0.8]])
+    vals = rng.uniform(0, 1, (5, 6))
+
+    # identical to the sublevel complex of the negated field, per dimension
+    p = Periodica()
+    p.periodic_grid(U, vals, sublevel=False)
+    q = grid(U, -vals)
+    assert np.array_equal(p.quotient_arcs, q.quotient_arcs)
+    assert np.array_equal(p.quotient_arc_shift, q.quotient_arc_shift)
+    assert np.array_equal(p.quotient_vertex_filtration, q.quotient_vertex_filtration)
+    assert np.array_equal(p.quotient_arc_filtration, q.quotient_arc_filtration)
+    p.merge_tree()
+    q.merge_tree()
+    for bp, bq in zip(p.barcodes(), q.barcodes()):
+        assert len(bp) == len(bq)
+        assert np.allclose(sorted(map(tuple, bp)), sorted(map(tuple, bq)))
+
+    # arc filtration negates BEFORE the lower-star max: max(-f_u, -f_v)
+    f = vals.ravel()
+    src, tgt = p.quotient_arcs[:, 0], p.quotient_arcs[:, 1]
+    assert np.array_equal(p.quotient_arc_filtration, np.maximum(-f[src], -f[tgt]))
+
+    # grid_values stays raw and save_grid round-trips the original field
+    assert np.array_equal(p.grid_values, vals)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+        path = tf.name
+    p.save_grid(path)
+    r = Periodica()
+    r.load_grid(path)
+    assert np.allclose(r.grid_values, vals)
+    Path(path).unlink()
+
+    # gudhi cross-check: superlevel of -vals == sublevel of vals; reuse the
+    # snake-ridge field whose sublevel dim-0 bars gudhi already validates
+    import gudhi
+    n, seed = 6, 3
+    rng = np.random.default_rng(seed)
+    ridge_vals = np.zeros((n, n))
+    ridge_vals[: n - 1, : n - 1] = rng.uniform(0.0, 1.4, (n - 1, n - 1))
+    ridge = [(n - 1, j) for j in range(n)] + [(i, n - 1) for i in range(n - 1)]
+    for k, ij in enumerate(ridge):
+        ridge_vals[ij] = 1.8 + 0.01 * k
+    s = Periodica()
+    s.periodic_grid(np.eye(2), -ridge_vals, sublevel=False)
+    s.merge_tree()
+    mergers = [bar for bar in finite_positive_bars(s.barcodes()[2]) if bar[1] < 1.5]
+    pcc = gudhi.PeriodicCubicalComplex(vertices=ridge_vals, periodic_dimensions=[True, True])
+    ref = sorted((b, d) for dim, (b, d) in pcc.persistence()
+                 if dim == 0 and np.isfinite(d) and d - b > 1e-9)
+    assert len(mergers) == len(ref) and np.allclose(mergers, ref), (mergers, ref)
+    print('PASS superlevel mode (negation equivalence, round-trip, gudhi)')
+
+
 if __name__ == '__main__':
     test_directions()
     test_against_gudhi()
@@ -249,4 +308,5 @@ if __name__ == '__main__':
     test_small_N()
     test_grid_file()
     test_invariants()
+    test_superlevel()
     print('All periodic_grid tests passed.')

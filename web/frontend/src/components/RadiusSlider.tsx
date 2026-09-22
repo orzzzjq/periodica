@@ -77,8 +77,8 @@ export default function RadiusSlider() {
   return (
     <>
       <SliderRow
-        // grid mode: the threshold is a plain function value, not a radius
-        tex={results.grid ? 'f' : 'f_{\\text{Del}}'}
+        // grid mode: the threshold is a sublevel function value, not a radius
+        tex={results.grid ? 'f_{\\text{Sub}}' : 'f_{\\text{Del}}'}
         value={radius}
         min={dMin}
         max={dMax}
@@ -86,7 +86,8 @@ export default function RadiusSlider() {
       />
       {vor && (
         <SliderRow
-          tex={'f_{\\text{Vor}}'}
+          // grid mode: superlevel threshold on the negated (-f) scale
+          tex={results.grid ? 'f_{\\text{Sup}}' : 'f_{\\text{Vor}}'}
           value={radiusVor}
           min={vor.min}
           max={vor.max}

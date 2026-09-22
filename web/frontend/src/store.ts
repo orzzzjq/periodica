@@ -24,7 +24,9 @@ export interface Inputs {
 
 interface UiState {
   radius: number // f_Del: Delaunay filtration threshold (power-distance scale)
-  radiusVor: number // f_Vor: Voronoi filtration threshold (negated power-distance scale)
+  // f_Vor: Voronoi filtration threshold (negated power-distance scale);
+  // in grid mode this is f_Sup, the superlevel threshold on the -f scale
+  radiusVor: number
   showPoints: boolean
   showBasis: boolean
   showDomains: boolean
@@ -37,9 +39,12 @@ interface UiState {
   showVoronoiArcs: boolean
   showBalls: boolean
   showVoronoiBalls: boolean
-  // grid mode, 3D only: sublevel-set isosurface at the slider threshold
+  // grid mode, 3D only: sublevel-set isosurface at the f_Sub threshold and
+  // superlevel-set isosurface (of the negated field) at the f_Sup threshold
   showIsosurface: boolean
   isoOpacity: number
+  showIsosurfaceSup: boolean
+  isoOpacitySup: number
   ballOpacity: number // Delaunay filtration balls
   filtEdgeOpacity: number // Delaunay filtration edges
   coneOpacity: number // Voronoi filtration cones
@@ -227,6 +232,8 @@ export const useStore = create<State>((set, get) => {
       showVoronoiBalls: true,
       showIsosurface: true,
       isoOpacity: 0.6,
+      showIsosurfaceSup: true,
+      isoOpacitySup: 0.6,
       ballOpacity: 0.35,
       filtEdgeOpacity: 1,
       coneOpacity: 0.35,

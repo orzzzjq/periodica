@@ -14,9 +14,12 @@ import Scene, { DisplayOptions } from './components/Scene'
 import { useStore } from './store'
 import './App.css'
 
-// Mutually exclusive complex selector for the descriptor panels.
+// Mutually exclusive complex selector for the descriptor panels. For grid
+// inputs the two channels are the sublevel/superlevel filtrations instead
+// of the Delaunay/Voronoi complexes (same state, different wording).
 function ComplexToggle() {
   const complexType = useStore((s) => s.ui.complexType)
+  const isGrid = useStore((s) => Boolean(s.results?.grid))
   const setUi = useStore((s) => s.setUi)
   return (
     <div className="complex-toggle">
@@ -26,7 +29,7 @@ function ComplexToggle() {
           className={`chip${complexType === t ? ' active' : ''}`}
           onClick={() => setUi({ complexType: t })}
         >
-          {t === 'delaunay' ? 'Delaunay' : 'Voronoi'}
+          {t === 'delaunay' ? (isGrid ? 'Sublevel' : 'Delaunay') : isGrid ? 'Superlevel' : 'Voronoi'}
         </button>
       ))}
     </div>

@@ -16,6 +16,7 @@ import { useStore } from '../store'
 
 const GREEN = '#30b830'
 const BLUE = '#0000fe'
+const RED = '#dd2222'
 const FILL = '#fbe5d6'
 
 function to3(p: number[]): [number, number, number] {
@@ -406,22 +407,41 @@ function GridSkeleton({ results }: { results: ComputeResponse }) {
 
 // Sublevel set of the lower-star filtration: grid edges with
 // max(f_start, f_end) below the threshold, tiled over the 3x domain.
-function GridFiltrationEdges({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const verts = useSubtreeVerts('delaunay')
+// With negate, the superlevel counterpart: edges of the NEGATED field with
+// max(-f_start, -f_end) below the f_Sup threshold (the -f scale), red like
+// the Voronoi overlays and filtered by the superlevel subtree channel.
+function GridFiltrationEdges({
+  results,
+  radius,
+  negate = false,
+}: {
+  results: ComputeResponse
+  radius: number
+  negate?: boolean
+}) {
+  const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
   const data = useMemo(() => {
     const g = results.grid
     if (!g) return { points: [], filtration: [] } as TiledSegments
-    const arcs = verts
-      ? g.arcs.filter((a) => verts.has(a.vStart) && verts.has(a.vEnd))
+    let arcs = negate
+      ? // negate BEFORE the lower-star max: max(-f_u, -f_v) = -min(f_u, f_v)
+        g.arcs.map((a) => ({
+          ...a,
+          filtration: Math.max(-g.values[a.vStart], -g.values[a.vEnd]),
+        }))
       : g.arcs
-    return buildTiledSegments(arcs, results, results.d === 2 ? 0.002 : 0)
-  }, [results, verts])
-  const opacity = useStore((s) => s.ui.filtEdgeOpacity)
-  return <PrefixSegments data={data} threshold={radius} color={BLUE} opacity={opacity} />
+    if (verts) arcs = arcs.filter((a) => verts.has(a.vStart) && verts.has(a.vEnd))
+    return buildTiledSegments(arcs, results, results.d === 2 ? (negate ? 0.005 : 0.002) : 0)
+  }, [results, verts, negate])
+  const opacity = useStore((s) => (negate ? s.ui.vorEdgeOpacity : s.ui.filtEdgeOpacity))
+  return (
+    <PrefixSegments data={data} threshold={radius} color={negate ? RED : BLUE} opacity={opacity} />
+  )
 }
 
-// VESTA-like gold for the sublevel isosurface
+// VESTA-like gold for the sublevel isosurface, blue for the superlevel one
 const ISO_COLOR = '#e0b53c'
+const ISO_COLOR_SUP = '#4c7bd8'
 
 // Integer combos z of the reduced-basis rows whose translated U-parallelepiped
 // can intersect the 3x Dirichlet domain. Per-halfspace test with the exact
@@ -478,25 +498,46 @@ function latticeTranslates3x(results: ComputeResponse, U: number[][]): [number, 
 // cover the 3x domain and clipped to it by the Dirichlet halfspaces. Under a
 // subtree filter, patches bounding components without a filtered vertex are
 // ghosted (the labeling uses the same arc adjacency as the merge tree).
-function GridIsosurface({ results, radius }: { results: ComputeResponse; radius: number }) {
+// With negate, the superlevel counterpart: the isosurface of the NEGATED
+// field at the f_Sup threshold, on the superlevel subtree channel.
+function GridIsosurface({
+  results,
+  radius,
+  negate = false,
+}: {
+  results: ComputeResponse
+  radius: number
+  negate?: boolean
+}) {
   const g = results.grid
   const is3d = results.d === 3
-  const verts = useSubtreeVerts('delaunay')
-  const opacity = useStore((s) => s.ui.isoOpacity)
+  const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
+  const opacity = useStore((s) => (negate ? s.ui.isoOpacitySup : s.ui.isoOpacity))
   // the lattice that produced these results (grid geometry is built from U,
   // not the reduced basis; inputs.lattice may have been edited since)
   const U = useStore((s) => s.computedLattice)
   const inclRef = useRef<THREE.InstancedMesh>(null)
   const ghostRef = useRef<THREE.InstancedMesh>(null)
 
+  const vals = useMemo(
+    () => (g && negate ? g.values.map((v) => -v) : (g?.values ?? null)),
+    [g, negate],
+  )
   const field = useMemo(
-    () => (g && U && is3d ? buildGridField(g.shape, g.values, U) : null),
-    [g, U, is3d],
+    () => (g && vals && U && is3d ? buildGridField(g.shape, vals, U) : null),
+    [g, vals, U, is3d],
   )
-  const sortedArcs = useMemo(
-    () => (g && is3d ? [...g.arcs].sort((a, b) => a.filtration - b.filtration) : []),
-    [g, is3d],
-  )
+  const sortedArcs = useMemo(() => {
+    if (!g || !is3d) return []
+    // negate BEFORE the lower-star max: max(-f_u, -f_v) = -min(f_u, f_v)
+    const arcs = negate
+      ? g.arcs.map((a) => ({
+          ...a,
+          filtration: Math.max(-g.values[a.vStart], -g.values[a.vEnd]),
+        }))
+      : [...g.arcs]
+    return arcs.sort((a, b) => a.filtration - b.filtration)
+  }, [g, is3d, negate])
   const translates = useMemo(
     () => (U && is3d ? latticeTranslates3x(results, U) : []),
     [results, U, is3d],
@@ -516,12 +557,17 @@ function GridIsosurface({ results, radius }: { results: ComputeResponse; radius:
     [results, is3d],
   )
 
+  // radiusVor defaults to -Infinity ("at the slider minimum"): no surface
+  const finite = Number.isFinite(radius)
   const t = radius + filtEps(radius)
-  const mesh = useMemo(() => (field ? marchingCubes(field, t) : null), [field, t])
+  const mesh = useMemo(
+    () => (field && finite ? marchingCubes(field, t) : null),
+    [field, finite, t],
+  )
   // component labeling is only needed while a subtree filter is active
   const roots = useMemo(
-    () => (g && verts ? labelSublevelComponents(sortedArcs, g.values.length, t) : null),
-    [g, sortedArcs, t, verts],
+    () => (g && verts && finite ? labelSublevelComponents(sortedArcs, g.values.length, t) : null),
+    [g, sortedArcs, t, verts, finite],
   )
   // position/normal attributes are shared by the included and ghost
   // geometries; a filter change swaps only the index buffers
@@ -570,6 +616,7 @@ function GridIsosurface({ results, radius }: { results: ComputeResponse; radius:
   }, [translates, nT, geos])
 
   if (!g || !is3d || !geos || nT === 0) return null
+  const color = negate ? ISO_COLOR_SUP : ISO_COLOR
   return (
     // renderOrder −1: draw before the other transparents so ghost points and
     // edge lines composite on top of the surface
@@ -583,7 +630,7 @@ function GridIsosurface({ results, radius }: { results: ComputeResponse; radius:
         renderOrder={-1}
       >
         <meshPhongMaterial
-          color={ISO_COLOR}
+          color={color}
           specular="#777777"
           shininess={100}
           side={THREE.DoubleSide}
@@ -603,7 +650,7 @@ function GridIsosurface({ results, radius }: { results: ComputeResponse; radius:
           renderOrder={-1}
         >
           <meshPhongMaterial
-            color={ISO_COLOR}
+            color={color}
             specular="#777777"
             shininess={100}
             side={THREE.DoubleSide}
@@ -617,8 +664,6 @@ function GridIsosurface({ results, radius }: { results: ComputeResponse; radius:
     </>
   )
 }
-
-const RED = '#dd2222'
 
 function VoronoiSkeleton({ results }: { results: ComputeResponse }) {
   const g = results.voronoiGeometry
@@ -1361,8 +1406,16 @@ export default function Scene() {
         <>
           {ui.showFullSkeleton && <GridSkeleton results={results} />}
           {ui.showFiltrationEdges && <GridFiltrationEdges results={results} radius={ui.radius} />}
+          {/* superlevel overlays (negated field, f_Sup on the -f scale);
+              gated on the superlevel pass having succeeded */}
+          {ui.showVoronoiFiltrationEdges && results.voronoi && (
+            <GridFiltrationEdges results={results} radius={ui.radiusVor} negate />
+          )}
           {ui.showPoints && <GridPoints results={results} radius={ui.radius} />}
           {!is2d && ui.showIsosurface && <GridIsosurface results={results} radius={ui.radius} />}
+          {!is2d && ui.showIsosurfaceSup && results.voronoi && (
+            <GridIsosurface results={results} radius={ui.radiusVor} negate />
+          )}
         </>
       ) : (
         <>
@@ -1414,12 +1467,14 @@ const GRID_DISPLAY_TOGGLES = [
 
 const GRID_FILTRATION_TOGGLES = [
   { key: 'showFiltrationEdges', label: 'sublevel edges', opacityKey: 'filtEdgeOpacity' },
+  { key: 'showVoronoiFiltrationEdges', label: 'superlevel edges', opacityKey: 'vorEdgeOpacity' },
 ] as const
 
-// the isosurface exists only in 3D grid mode
+// the isosurfaces exist only in 3D grid mode
 const GRID_FILTRATION_TOGGLES_3D = [
   ...GRID_FILTRATION_TOGGLES,
   { key: 'showIsosurface', label: 'sublevel isosurface', opacityKey: 'isoOpacity' },
+  { key: 'showIsosurfaceSup', label: 'superlevel isosurface', opacityKey: 'isoOpacitySup' },
 ] as const
 
 export function DisplayOptions() {

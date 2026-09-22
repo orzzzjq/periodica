@@ -82,6 +82,8 @@ export interface VoronoiGeometry {
 
 export interface ComputeResponse {
   d: 2 | 3
+  // point sets: Voronoi descriptors; grids: superlevel descriptors (the
+  // sublevel filtration of the negated field, axes on the -f scale)
   voronoi: Descriptors | null
   voronoiError: string | null
   voronoiGeometry: VoronoiGeometry | null

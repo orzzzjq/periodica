@@ -326,13 +326,27 @@ def compute_grid(req: GridComputeRequest):
             'vEnd': t,
         })
 
+    # superlevel descriptors from the negated field, filling the response's
+    # voronoi slot (the frontend's second descriptor channel); an isolated
+    # failure degrades to an error banner like the Voronoi pipeline does
+    voronoi = None
+    voronoi_error = None
+    try:
+        q = Periodica()
+        q.periodic_grid(U, values, sublevel=False)
+        q.merge_tree()
+        voronoi = encode_descriptors(q.barcodes(), q.images(req.imageSize), q.tree, req.imageSize)
+    except Exception as e:
+        voronoi_error = str(e)
+
     desc = encode_descriptors(barcodes, images, p.tree, req.imageSize)
     # Same response shape as /api/compute so the descriptor panels work
     # unchanged; the point-set geometry fields stay empty (the scene shows
-    # just the cell — grid visualization is a separate step).
+    # just the cell — grid visualization is a separate step). In grid mode
+    # the 'voronoi' slot carries the superlevel descriptors.
     return {
-        'voronoi': None,
-        'voronoiError': None,
+        'voronoi': voronoi,
+        'voronoiError': voronoi_error,
         'voronoiGeometry': None,
         'd': d,
         'basis': V[:, :d].T.tolist(),
