@@ -439,9 +439,10 @@ function GridFiltrationEdges({
   )
 }
 
-// VESTA-like gold for the sublevel isosurface, blue for the superlevel one
-const ISO_COLOR = '#e0b53c'
-const ISO_COLOR_SUP = '#4c7bd8'
+// isosurface colors match the Delaunay/Voronoi convention: sublevel takes
+// the Delaunay ball blue, superlevel the Voronoi cone red
+const ISO_COLOR = '#8fb0e8'
+const ISO_COLOR_SUP = '#e08f8f'
 
 // Integer combos z of the reduced-basis rows whose translated U-parallelepiped
 // can intersect the 3x Dirichlet domain. Per-halfspace test with the exact
