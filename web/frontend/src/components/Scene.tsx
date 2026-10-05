@@ -17,11 +17,15 @@ import {
 import {
   buildCapPieces,
   buildPowerCells,
+  buildPowerCells2D,
+  buildRegionPieces2D,
   powerCaps,
+  powerRegion2D,
   powerSurface,
   surfaceTranslates,
   type CapPieces,
   type PowerCells,
+  type PowerCells2D,
 } from '../powerSurface'
 import { useStore } from '../store'
 
@@ -889,6 +893,106 @@ function PowerIsosurface({
   )
 }
 
+// 2D drawing layer of the exact Voronoi region: above the Delaunay balls
+// (-0.01), below the cones (CONE_Z)
+const REGION_Z = -0.0095
+
+interface PowerGeometry2D {
+  cells: PowerCells2D
+  pieces: CapPieces
+  nVor: number
+}
+const powerGeometry2DCache = new WeakMap<ComputeResponse, PowerGeometry2D>()
+
+function powerGeometry2D(results: ComputeResponse): PowerGeometry2D {
+  let g = powerGeometry2DCache.get(results)
+  if (!g) {
+    const { positions3x, kept, weights } = results.points
+    const vor: number[][] = []
+    for (const a of results.voronoiGeometry?.arcs ?? []) {
+      vor[a.vStart] = a.start
+      vor[a.vEnd] = a.end
+    }
+    const cells = buildPowerCells2D({
+      sites: kept.map((orig) => positions3x[orig]),
+      weights: kept.map((orig) => weights[orig]),
+      arcs: results.quotientArcs,
+      basis: results.basis,
+      vorVertices: vor,
+    })
+    g = {
+      cells,
+      pieces: buildRegionPieces2D(cells, (results.domain3x as Polytope2D).outline, REGION_Z),
+      nVor: vor.length,
+    }
+    powerGeometry2DCache.set(results, g)
+  }
+  return g
+}
+
+// Exact Voronoi filtration region for 2D point sets: the sublevel set
+// {pi >= -f_Vor} of the power distance is the plane minus the disk union,
+// drawn over the 3x domain as each power cell's part of the domain minus
+// its own disk (see powerSurface.ts). The pieces never overlap, so the flat
+// translucent fill needs no stencil. Under a subtree filter, the parts
+// bounding other components are ghosted, with components labeled on the
+// arcs of the Voronoi merge tree.
+function VoronoiRegion2D({ results, radius }: { results: ComputeResponse; radius: number }) {
+  const verts = useSubtreeVerts('voronoi')
+  const opacity = useStore((s) => s.ui.vorSurfaceOpacity)
+  const geometry = useMemo(() => powerGeometry2D(results), [results])
+  const sortedArcs = useMemo(
+    () => [...(results.voronoiGeometry?.arcs ?? [])].sort((a, b) => a.filtration - b.filtration),
+    [results],
+  )
+
+  const finite = Number.isFinite(radius) // radiusVor defaults to -Infinity
+  const t = radius + filtEps(radius)
+  const filtering = verts !== null
+  const mesh = useMemo(
+    // f_Vor lives on the -pi scale
+    () => (finite ? powerRegion2D(geometry.cells, geometry.pieces, -t, true, filtering) : null),
+    [geometry, finite, t, filtering],
+  )
+  const roots = useMemo(
+    () => (verts && finite ? labelSublevelComponents(sortedArcs, geometry.nVor, t) : null),
+    [geometry, sortedArcs, t, verts, finite],
+  )
+  const geos = useMemo(() => makeIsoGeos(mesh, roots, verts), [mesh, roots, verts])
+  useEffect(() => {
+    return () => {
+      geos?.included.dispose()
+      geos?.ghost?.dispose()
+    }
+  }, [geos])
+
+  if (!geos) return null
+  return (
+    <>
+      <mesh geometry={geos.included} frustumCulled={false}>
+        <meshBasicMaterial
+          color={ISO_COLOR_SUP}
+          transparent
+          opacity={opacity}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      {geos.ghost && (
+        <mesh geometry={geos.ghost} frustumCulled={false}>
+          <meshBasicMaterial
+            color={ISO_COLOR_SUP}
+            transparent
+            opacity={Math.min(0.1, opacity * 0.25)}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+    </>
+  )
+}
+
 function VoronoiSkeleton({ results }: { results: ComputeResponse }) {
   const g = results.voronoiGeometry
   const z = results.d === 2 ? 0.003 : 0
@@ -1657,6 +1761,9 @@ export default function Scene() {
           {!is2d && ui.showVorSurface && results.voronoiGeometry && (
             <PowerIsosurface results={results} radius={ui.radiusVor} negate />
           )}
+          {is2d && ui.showVorSurface && results.voronoiGeometry && (
+            <VoronoiRegion2D results={results} radius={ui.radiusVor} />
+          )}
         </>
       )}
     </Canvas>
@@ -1684,11 +1791,17 @@ const FILTRATION_TOGGLES = [
   { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
 ] as const
 
-// the power-field isosurfaces exist only in 3D point-set mode
+// 3D point sets: the exact filtration surfaces
 const FILTRATION_TOGGLES_3D = [
   ...FILTRATION_TOGGLES,
   { key: 'showDelSurface', label: 'Delaunay filtration (surface)', opacityKey: 'delSurfaceOpacity' },
   { key: 'showVorSurface', label: 'Voronoi filtration (surface)', opacityKey: 'vorSurfaceOpacity' },
+] as const
+
+// 2D point sets: the exact Voronoi region (the Delaunay balls are exact already)
+const FILTRATION_TOGGLES_2D = [
+  ...FILTRATION_TOGGLES,
+  { key: 'showVorSurface', label: 'Voronoi filtration (region)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
 // grid mode renders only points/skeleton/sublevel edges (plus the shared
@@ -1725,7 +1838,7 @@ export function DisplayOptions() {
       : GRID_FILTRATION_TOGGLES
     : is3d
       ? FILTRATION_TOGGLES_3D
-      : FILTRATION_TOGGLES
+      : FILTRATION_TOGGLES_2D
   return (
     <div className="popup-control">
       <button className={open ? 'active' : ''} onClick={() => setOpen(!open)}>

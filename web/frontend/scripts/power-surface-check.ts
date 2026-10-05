@@ -6,7 +6,10 @@
 import {
   buildCapPieces,
   buildPowerCells,
+  buildPowerCells2D,
+  buildRegionPieces2D,
   powerCaps,
+  powerRegion2D,
   powerSurface,
   surfaceTranslates,
 } from '../src/powerSurface.ts'
@@ -350,6 +353,198 @@ async function runCase(name: string, lattice: number[][], nPts: number, wMax: nu
   )
 }
 
+// 2D: the exact regions {pi <= level} / {pi >= level} over the 3x domain
+async function runCase2D(name: string, lattice: number[][], nPts: number, wMax: number, seed: number) {
+  const rnd = mulberry32(seed)
+  const frac = Array.from({ length: nPts }, () => [rnd(), rnd()])
+  const points = frac.map((f) => lattice.map((row) => row[0] * f[0] + row[1] * f[1]))
+  const weights = frac.map(() => wMax * rnd())
+  const res = await fetch(`${BASE}/api/compute`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', connection: 'close' },
+    body: JSON.stringify({ d: 2, lattice, points, weights, imageSize: 20 }),
+  })
+  if (!res.ok) throw new Error(`${name}: backend ${res.status} ${await res.text()}`)
+  const r = await res.json()
+  const { positions3x, kept } = r.points
+  const sites: number[][] = kept.map((o: number) => positions3x[o])
+  const w: number[] = kept.map((o: number) => r.points.weights[o])
+  const vor: number[][] = []
+  const fVor: number[] = []
+  for (const a of r.voronoiGeometry.arcs) {
+    vor[a.vStart] = a.start
+    vor[a.vEnd] = a.end
+    fVor[a.vStart] = a.fStart
+    fVor[a.vEnd] = a.fEnd
+  }
+  const t0 = performance.now()
+  const cells = buildPowerCells2D({ sites, weights: w, arcs: r.quotientArcs, basis: r.basis, vorVertices: vor })
+  const pieces = buildRegionPieces2D(cells, r.domain3x.outline, 0)
+  const n = cells.n
+  console.log(
+    `${name}: ${n} sites, ${vor.length} Voronoi vertices, ${pieces.count} pieces, ` +
+      `setup ${(performance.now() - t0).toFixed(0)} ms`,
+  )
+
+  const B = r.basis as number[][]
+  const shifts: number[][] = []
+  for (let a = -4; a <= 4; a++)
+    for (let b = -4; b <= 4; b++) shifts.push([a * B[0][0] + b * B[1][0], a * B[0][1] + b * B[1][1]])
+  const zero = shifts.findIndex((s) => s[0] === 0 && s[1] === 0)
+  const power = (x: number, y: number): [number, number, number] => {
+    let best = Infinity
+    let bi = -1
+    let bs = -1
+    for (let i = 0; i < n; i++)
+      for (let s = 0; s < shifts.length; s++) {
+        const dx = x - sites[i][0] - shifts[s][0]
+        const dy = y - sites[i][1] - shifts[s][1]
+        const v = dx * dx + dy * dy - w[i]
+        if (v < best) {
+          best = v
+          bi = i
+          bs = s
+        }
+      }
+    return [best, bi, bs]
+  }
+
+  // 1. the lines describe the power cells
+  let cellMismatch = 0
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < 400; k++) {
+      const R = cells.radius[i] * 1.1
+      const y = [R * (2 * rnd() - 1), R * (2 * rnd() - 1)]
+      let margin = Infinity
+      for (let p = cells.lineStart[i]; p < cells.lineStart[i + 1]; p++) {
+        const nn = Math.hypot(cells.lines[3 * p], cells.lines[3 * p + 1])
+        margin = Math.min(
+          margin,
+          (cells.lines[3 * p + 2] - (cells.lines[3 * p] * y[0] + cells.lines[3 * p + 1] * y[1])) / nn,
+        )
+      }
+      if (Math.abs(margin) < 1e-6) continue
+      const [, bi, bs] = power(sites[i][0] + y[0], sites[i][1] + y[1])
+      if (margin > 0 !== (bi === i && bs === zero)) cellMismatch++
+    }
+  }
+  check(cellMismatch === 0, `cells: ${cellMismatch} sample points disagree with the brute-force nearest site`)
+  let unnamed = 0
+  for (let v = 0; v < cells.vertVor.length; v++) if (cells.vertVor[v] < 0) unnamed++
+  check(unnamed === 0, `${unnamed} of ${cells.vertVor.length} cell vertices not matched to a Voronoi vertex`)
+
+  // 2. the pieces tile the 3x domain
+  const loop = r.domain3x.outline as number[][]
+  let domainArea = 0
+  for (let v = 0; v < loop.length; v++) {
+    const q = loop[(v + 1) % loop.length]
+    domainArea += 0.5 * (loop[v][0] * q[1] - q[0] * loop[v][1])
+  }
+  domainArea = Math.abs(domainArea)
+  let pieceArea = 0
+  for (let p = 0; p < pieces.count; p++)
+    for (let v = pieces.polyStart[p]; v < pieces.polyStart[p + 1]; v++) {
+      const wv = v + 1 === pieces.polyStart[p + 1] ? pieces.polyStart[p] : v + 1
+      pieceArea += 0.5 * (pieces.poly[2 * v] * pieces.poly[2 * wv + 1] - pieces.poly[2 * wv] * pieces.poly[2 * v + 1])
+    }
+  check(Math.abs(pieceArea - domainArea) < 1e-6 * domainArea, `pieces tile the 3x domain: ${pieceArea} vs ${domainArea}`)
+
+  // sample points of the 3x domain, for the area of {pi <= level}
+  const xs = loop.map((v) => v[0])
+  const ys = loop.map((v) => v[1])
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]
+  const samples: number[] = []
+  while (samples.length < 60000) {
+    const x = x0 + (x1 - x0) * rnd()
+    const y = y0 + (y1 - y0) * rnd()
+    if (r.domainA.every((a: number[], h: number) => a[0] * x + a[1] * y <= 3 * r.domainB[h])) samples.push(power(x, y)[0])
+  }
+
+  const tri2 = (P: Float32Array, o: number) =>
+    0.5 * Math.abs((P[o + 3] - P[o]) * (P[o + 7] - P[o + 1]) - (P[o + 6] - P[o]) * (P[o + 4] - P[o + 1]))
+  const piTop = Math.max(...fVor.map((f) => -f))
+  const piBot = -Math.max(...w)
+  const edgeF: number[] = r.voronoiGeometry.arcs.map((a: { filtration: number }) => a.filtration)
+  const levels = [0.08, 0.3, 0.55, 0.8, 0.97].map((q) => piBot + q * (piTop - piBot))
+  const fresh = edgeF.sort((a, b) => a - b)[Math.floor(edgeF.length / 3)]
+  levels.push(-(fresh + 1e-4 * (piTop - piBot)))
+  const sideTol = 1e-3 * (piTop - piBot)
+  let tTick = 0
+  for (const level of levels) {
+    const tag = `level ${level.toFixed(4)}`
+    const t1 = performance.now()
+    const del = powerRegion2D(cells, pieces, level, false, false)
+    const vorMesh = powerRegion2D(cells, pieces, level, true, true)
+    tTick += performance.now() - t1
+
+    // 3. each region on its side of the level, inside the domain
+    let wrongSide = 0
+    let outside = 0
+    let aDel = 0
+    let aVor = 0
+    for (const [mesh, sign] of [[del, 1], [vorMesh, -1]] as const) {
+      for (let t = 0; t < mesh.triangleCount; t++) {
+        const o = 9 * t
+        const a = tri2(mesh.positions, o)
+        if (sign > 0) aDel += a
+        else aVor += a
+        if (a < 1e-10) continue
+        const x = (mesh.positions[o] + mesh.positions[o + 3] + mesh.positions[o + 6]) / 3
+        const y = (mesh.positions[o + 1] + mesh.positions[o + 4] + mesh.positions[o + 7]) / 3
+        if (sign * (power(x, y)[0] - level) > sideTol) wrongSide++
+        if (!r.domainA.every((q: number[], h: number) => q[0] * x + q[1] * y <= 3 * r.domainB[h] + 1e-6)) outside++
+      }
+    }
+    check(wrongSide === 0, `${tag}: ${wrongSide} triangles on the wrong side of the level`)
+    check(outside === 0, `${tag}: ${outside} triangles outside the 3x domain`)
+    // 4. the two regions split the domain, in the sampled proportion
+    check(
+      Math.abs(aDel + aVor - domainArea) < 2e-3 * domainArea,
+      `${tag}: areas ${aDel.toFixed(4)} + ${aVor.toFixed(4)} != domain ${domainArea.toFixed(4)}`,
+    )
+    const sampled = (samples.filter((v) => v <= level).length / samples.length) * domainArea
+    check(Math.abs(aDel - sampled) < 0.01 * domainArea, `${tag}: disk-union area ${aDel.toFixed(4)} vs sampled ${sampled.toFixed(4)}`)
+
+    // 5. owners: alive Voronoi vertices, one merge-tree component per connected part
+    const F = -level
+    const parent = Int32Array.from({ length: vor.length }, (_, v) => v)
+    const find = (v: number) => {
+      while (parent[v] !== v) v = parent[v] = parent[parent[v]]
+      return v
+    }
+    for (const a of r.voronoiGeometry.arcs) if (a.filtration <= F) parent[find(a.vStart)] = find(a.vEnd)
+    let badOwner = 0
+    let mixed = 0
+    const keyRoot = new Map<string, number>()
+    for (let t = 0; t < vorMesh.triangleCount; t++) {
+      if (tri2(vorMesh.positions, 9 * t) < 1e-10) continue
+      const own = vorMesh.triOwner[t]
+      if (own >= vor.length || !(fVor[own] <= F + 1e-9)) {
+        badOwner++
+        continue
+      }
+      const root = find(own)
+      for (let c = 0; c < 3; c++) {
+        const o = 9 * t + 3 * c
+        const key = `${vorMesh.positions[o].toFixed(5)},${vorMesh.positions[o + 1].toFixed(5)}`
+        const seen = keyRoot.get(key)
+        if (seen === undefined) keyRoot.set(key, root)
+        else if (seen !== root) mixed++
+      }
+    }
+    check(badOwner === 0, `${tag}: ${badOwner} triangles owned by a missing or unborn Voronoi vertex`)
+    check(mixed === 0, `${tag}: ${mixed} shared corners join parts of different components`)
+    console.log(
+      `  ${tag}: ${del.triangleCount}+${vorMesh.triangleCount} tris, ` +
+        `disk union ${(100 * aDel / domainArea).toFixed(2)}% of the domain (sampled ${(100 * sampled / domainArea).toFixed(2)}%)`,
+    )
+  }
+  console.log(`  per slider tick: ${(tTick / (2 * levels.length)).toFixed(2)} ms per region`)
+}
+
+await runCase2D('2D: 1 site, square', [[1, 0], [0, 1]], 1, 0, 3)
+await runCase2D('2D: 5 sites, skew, weighted', [[1, 0.3], [0, 0.9]], 5, 0.05, 5)
+await runCase2D('2D: 40 sites, skew, weighted', [[1, 0.3], [0, 0.9]], 40, 0.004, 9)
 await runCase('1 site, cubic', LATTICES.cubic, 1, 0, 1)
 await runCase('4 sites, cubic, unweighted', LATTICES.cubic, 4, 0, 2)
 await runCase('8 sites, skew, weighted', LATTICES.skew, 8, 0.06, 7)

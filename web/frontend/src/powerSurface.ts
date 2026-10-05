@@ -16,6 +16,11 @@
 // incident arc), so everything is computed once per canonical site and
 // instanced over the lattice by the caller.
 //
+// In 2D the same statement reads: inside a cell the sublevel set is the cell
+// intersected with one disk, the superlevel set the cell minus that disk.
+// The last section builds those regions over the 3x domain, sharing the
+// polygon/disk code of the 3D domain-boundary caps.
+//
 // The module is three.js-free and has no runtime imports, so it can be
 // exercised from node (scripts/power-surface-check.ts).
 
@@ -988,6 +993,28 @@ function dedupe2(xs: Float64Array, ys: Float64Array, m: number, eps2: number): n
   return k
 }
 
+// Nearest (0 when inside) and farthest distance from (su, sv) to the
+// counterclockwise convex polygon (xs, ys)[0..m).
+function pieceReach(
+  xs: Float64Array, ys: Float64Array, m: number, su: number, sv: number,
+): [number, number] {
+  let rmax = 0
+  let rmin = Infinity
+  let inside = true
+  for (let v = 0; v < m; v++) {
+    const w = v + 1 === m ? 0 : v + 1
+    rmax = Math.max(rmax, Math.hypot(xs[v] - su, ys[v] - sv))
+    const ex = xs[w] - xs[v]
+    const ey = ys[w] - ys[v]
+    if (ex * (sv - ys[v]) - ey * (su - xs[v]) < 0) inside = false
+    const el = ex * ex + ey * ey
+    let tt = el > 0 ? ((su - xs[v]) * ex + (sv - ys[v]) * ey) / el : 0
+    tt = Math.max(0, Math.min(1, tt))
+    rmin = Math.min(rmin, Math.hypot(xs[v] + tt * ex - su, ys[v] + tt * ey - sv))
+  }
+  return [inside ? 0 : rmin, rmax]
+}
+
 export function buildCapPieces(
   cells: PowerCells,
   domainA: number[][],
@@ -1122,20 +1149,7 @@ export function buildCapPieces(
             if (!(area > 1e-14 * facetR * facetR)) continue
 
             // nearest / farthest point of the piece from the projected site
-            let rmax = 0
-            let rmin = Infinity
-            let inside = true
-            for (let v = 0; v < m; v++) {
-              const w = v + 1 === m ? 0 : v + 1
-              rmax = Math.max(rmax, Math.hypot(ax[v] - su, ay[v] - sv))
-              const ex = ax[w] - ax[v]
-              const ey = ay[w] - ay[v]
-              if (ex * (sv - ay[v]) - ey * (su - ax[v]) < 0) inside = false
-              const el = ex * ex + ey * ey
-              let tt = el > 0 ? ((su - ax[v]) * ex + (sv - ay[v]) * ey) / el : 0
-              tt = Math.max(0, Math.min(1, tt))
-              rmin = Math.min(rmin, Math.hypot(ax[v] + tt * ex - su, ay[v] + tt * ey - sv))
-            }
+            const [rmin, rmax] = pieceReach(ax, ay, m, su, sv)
             site.push(i)
             center.push(sx, sy, sz)
             facet.push(fi)
@@ -1143,7 +1157,7 @@ export function buildCapPieces(
             polyStart.push(poly.length / 2)
             o.push(su, sv)
             h2.push(dn * dn)
-            rhoMin.push(inside ? 0 : rmin)
+            rhoMin.push(rmin)
             rhoMax.push(rmax)
           }
     }
@@ -1167,17 +1181,17 @@ export function buildCapPieces(
 
 const CIRCLE_SEGMENTS = 128
 
-// Caps closing the solid where the 3x domain boundary cuts it, in WORLD
-// space (the domain boundary is not periodic): per piece, the piece ∩ disk
-// (Delaunay ball union) or the piece minus the disk (Voronoi solid), where
-// the disk is the site's ball cut by the facet plane. Same level, side and
-// owner conventions as powerSurface.
-export function powerCaps(
-  cells: PowerCells,
+// Per piece, the piece ∩ disk (voronoi false) or the piece minus the disk
+// (voronoi true), where the disk is the piece's site ball of squared radius
+// level + w cut by the piece's plane; triangles in WORLD space through the
+// facet frames. `ownerOf(piece, u, v)` names the component of a frame point
+// outside the disk; without it triangles are owned by the piece's site.
+function pieceMesh(
   caps: CapPieces,
+  weights: Float64Array,
   level: number,
   voronoi: boolean,
-  withOwners: boolean,
+  ownerOf: ((p: number, u: number, v: number) => number) | null,
 ): IsosurfaceMesh {
   const out = meshWriter(4096)
   const { frames, poly, polyStart } = caps
@@ -1216,17 +1230,6 @@ export function powerCaps(
       owner,
     )
   }
-  // Voronoi owner of the frame point (u, v) of piece p
-  const ownerAt = (p: number, u: number, v: number) => {
-    const b = 12 * caps.facet[p]
-    return ascend(
-      cells,
-      caps.site[p],
-      frames[b] + u * frames[b + 3] + v * frames[b + 6] - caps.center[3 * p],
-      frames[b + 1] + u * frames[b + 4] + v * frames[b + 7] - caps.center[3 * p + 1],
-      frames[b + 2] + u * frames[b + 5] + v * frames[b + 8] - caps.center[3 * p + 2],
-    )
-  }
   // where the ray from (gu, gv) at angle th leaves the counterclockwise
   // convex polygon (xs, ys)[0..m) around it; writes hitU/hitV
   let hitU = 0
@@ -1262,7 +1265,7 @@ export function powerCaps(
       qu[v] = poly[2 * (v0 + v)]
       qv[v] = poly[2 * (v0 + v) + 1]
     }
-    const rho2 = level + cells.weights[i] - caps.h2[p]
+    const rho2 = level + weights[i] - caps.h2[p]
     const rho = rho2 > 0 ? Math.sqrt(rho2) : 0
     const disjoint = rho <= caps.rhoMin[p] // the disk misses the piece
     const covered = rho >= caps.rhoMax[p] // the disk covers the piece
@@ -1270,7 +1273,7 @@ export function powerCaps(
 
     if (voronoi ? disjoint : covered) {
       let owner = i
-      if (voronoi && withOwners) {
+      if (ownerOf) {
         if (caps.wholeOwner[p] === -2) {
           let gu = 0
           let gv = 0
@@ -1278,7 +1281,7 @@ export function powerCaps(
             gu += qu[v]
             gv += qv[v]
           }
-          caps.wholeOwner[p] = ownerAt(p, gu / m, gv / m)
+          caps.wholeOwner[p] = ownerOf(p, gu / m, gv / m)
         }
         owner = caps.wholeOwner[p]
       }
@@ -1326,7 +1329,7 @@ export function powerCaps(
     }
     if (!hasC) {
       // the disk only grazes the piece: all of it is outside
-      const owner = withOwners ? ownerAt(p, qu[0], qv[0]) : i
+      const owner = ownerOf ? ownerOf(p, qu[0], qv[0]) : i
       for (let v = 1; v + 1 < m; v++)
         emit(f, qu[0], qv[0], qu[v], qv[v], qu[v + 1], qv[v + 1], owner)
       continue
@@ -1370,8 +1373,8 @@ export function powerCaps(
       if (wide) {
         if (!inRun) {
           // a new connected stretch of the ring: one owner for all of it
-          runOwner = withOwners
-            ? ownerAt(p, (ciu + qiu + qju + cju) / 4, (civ + qiv + qjv + cjv) / 4)
+          runOwner = ownerOf
+            ? ownerOf(p, (ciu + qiu + qju + cju) / 4, (civ + qiv + qjv + cjv) / 4)
             : i
           inRun = true
         }
@@ -1385,4 +1388,355 @@ export function powerCaps(
     }
   }
   return out.finish()
+}
+
+// Caps closing the solid where the 3x domain boundary cuts it, in WORLD
+// space (the domain boundary is not periodic): per piece, the piece ∩ disk
+// (Delaunay ball union) or the piece minus the disk (Voronoi solid), where
+// the disk is the site's ball cut by the facet plane. Same level, side and
+// owner conventions as powerSurface.
+export function powerCaps(
+  cells: PowerCells,
+  caps: CapPieces,
+  level: number,
+  voronoi: boolean,
+  withOwners: boolean,
+): IsosurfaceMesh {
+  const { frames } = caps
+  return pieceMesh(
+    caps,
+    cells.weights,
+    level,
+    voronoi,
+    voronoi && withOwners
+      ? (p, u, v) => {
+          const b = 12 * caps.facet[p]
+          return ascend(
+            cells,
+            caps.site[p],
+            frames[b] + u * frames[b + 3] + v * frames[b + 6] - caps.center[3 * p],
+            frames[b + 1] + u * frames[b + 4] + v * frames[b + 7] - caps.center[3 * p + 1],
+            frames[b + 2] + u * frames[b + 5] + v * frames[b + 8] - caps.center[3 * p + 2],
+          )
+        }
+      : null,
+  )
+}
+
+// ---- 2D: exact filtration regions --------------------------------------------
+
+export interface PowerCells2D {
+  n: number
+  centers: Float64Array // 2 per site
+  weights: Float64Array
+  // cell i = { y : n_k · y <= c_k } relative to its site; 3 numbers per line
+  lineStart: Uint32Array // n + 1 offsets
+  lines: Float64Array
+  // cell vertices relative to the site, counterclockwise
+  vertStart: Uint32Array // n + 1 offsets
+  verts: Float64Array // 2 per cell vertex
+  vertVor: Int32Array // quotient Voronoi vertex id per cell vertex, -1 unknown
+  radius: Float64Array // per site: farthest cell vertex
+  basis: number[][]
+}
+
+// The 2D power cells of the quotient sites (input as for buildPowerCells,
+// with two coordinates; `level` is unused).
+export function buildPowerCells2D(input: PowerCellsInput): PowerCells2D {
+  const n = input.sites.length
+  const centers = new Float64Array(2 * n)
+  const weights = Float64Array.from(input.weights)
+  for (let i = 0; i < n; i++) {
+    centers[2 * i] = input.sites[i][0]
+    centers[2 * i + 1] = input.sites[i][1]
+  }
+  const lists: number[][] = Array.from({ length: n }, () => [])
+  let span = 0
+  for (const a of input.arcs) {
+    const dx = a.end[0] - a.start[0]
+    const dy = a.end[1] - a.start[1]
+    const d2 = dx * dx + dy * dy
+    if (d2 === 0) continue
+    span = Math.max(span, Math.sqrt(d2))
+    const ws = weights[a.vStart]
+    const we = weights[a.vEnd]
+    lists[a.vStart].push(2 * dx, 2 * dy, d2 + ws - we)
+    lists[a.vEnd].push(-2 * dx, -2 * dy, d2 + we - ws)
+  }
+
+  const lineStart = new Uint32Array(n + 1)
+  const vertStart = new Uint32Array(n + 1)
+  const radius = new Float64Array(n)
+  const vertChunks: number[][] = []
+  // a cell is cut out of a box far larger than any cell; one that still
+  // touches the box is unbounded (degenerate input) and gets no vertices
+  const box = 1e3 * (span || 1)
+  let maxK = 0
+  for (let i = 0; i < n; i++) maxK = Math.max(maxK, lists[i].length / 3)
+  let ax = new Float64Array(maxK + 8)
+  let ay = new Float64Array(maxK + 8)
+  let bx = new Float64Array(maxK + 8)
+  let by = new Float64Array(maxK + 8)
+  for (let i = 0; i < n; i++) {
+    const ln = lists[i]
+    let m = 4
+    ax.set([-box, box, box, -box])
+    ay.set([-box, -box, box, box])
+    for (let k = 0; k < ln.length && m >= 3; k += 3) {
+      m = clip2(ax, ay, m, ln[k], ln[k + 1], ln[k + 2], bx, by)
+      let tmp = ax
+      ax = bx
+      bx = tmp
+      tmp = ay
+      ay = by
+      by = tmp
+    }
+    m = dedupe2(ax, ay, m, (1e-9 * (span || 1)) ** 2)
+    const verts: number[] = []
+    let r = 0
+    let bounded = m >= 3
+    for (let v = 0; v < m; v++) {
+      if (Math.max(Math.abs(ax[v]), Math.abs(ay[v])) > 0.5 * box) bounded = false
+      r = Math.max(r, Math.hypot(ax[v], ay[v]))
+    }
+    if (bounded) for (let v = 0; v < m; v++) verts.push(ax[v], ay[v])
+    radius[i] = bounded ? r : 0
+    vertChunks.push(verts)
+    lineStart[i + 1] = lineStart[i] + ln.length / 3
+    vertStart[i + 1] = vertStart[i] + verts.length / 2
+  }
+  const lines = Float64Array.from(lists.flat())
+  const verts = Float64Array.from(vertChunks.flat())
+
+  // name the cell vertices: nearest quotient Voronoi vertex modulo the lattice
+  const vertVor = new Int32Array(verts.length / 2).fill(-1)
+  const vor = input.vorVertices
+  if (vor) {
+    const B = input.basis
+    // columns of M are the basis vectors: x = M z
+    const det = B[0][0] * B[1][1] - B[1][0] * B[0][1]
+    const tol2 = (1e-5 * Math.hypot(B[0][0], B[0][1])) ** 2
+    for (let i = 0; i < n; i++) {
+      for (let v = vertStart[i]; v < vertStart[i + 1]; v++) {
+        const X = centers[2 * i] + verts[2 * v]
+        const Y = centers[2 * i + 1] + verts[2 * v + 1]
+        let best = -1
+        let bestD = Infinity
+        for (let id = 0; id < vor.length; id++) {
+          const R = vor[id]
+          if (!R) continue
+          const dx = X - R[0]
+          const dy = Y - R[1]
+          let f0 = (B[1][1] * dx - B[1][0] * dy) / det
+          let f1 = (B[0][0] * dy - B[0][1] * dx) / det
+          f0 -= Math.round(f0)
+          f1 -= Math.round(f1)
+          const rx = B[0][0] * f0 + B[1][0] * f1
+          const ry = B[0][1] * f0 + B[1][1] * f1
+          const d2 = rx * rx + ry * ry
+          if (d2 < bestD) {
+            bestD = d2
+            best = id
+          }
+        }
+        if (bestD < tol2) vertVor[v] = best
+      }
+    }
+  }
+
+  return { n, centers, weights, lineStart, lines, vertStart, verts, vertVor, radius, basis: input.basis }
+}
+
+// 2D counterpart of ascend: from the point (x, y) of cell i (relative to the
+// site) walk away from the site to a cell edge, then along it away from the
+// site's foot to a vertex. The power distance to the site never decreases.
+export function ascend2D(cells: PowerCells2D, i: number, x: number, y: number): number {
+  const { lines, lineStart, verts, vertStart, vertVor } = cells
+  const p0 = lineStart[i]
+  const p1 = lineStart[i + 1]
+  if (vertStart[i + 1] === vertStart[i]) return -1
+  let j = -1
+  let s = Infinity
+  for (let p = p0; p < p1; p++) {
+    const d = lines[3 * p] * x + lines[3 * p + 1] * y
+    if (d > 0) {
+      const sp = lines[3 * p + 2] / d
+      if (sp < s) {
+        s = sp
+        j = p
+      }
+    }
+  }
+  let vx = x
+  let vy = y
+  if (j >= 0) {
+    if (s < 1) s = 1
+    vx = s * x
+    vy = s * y
+    const jx = lines[3 * j]
+    const jy = lines[3 * j + 1]
+    const jn2 = jx * jx + jy * jy
+    const fs = lines[3 * j + 2] / jn2
+    let dx = vx - fs * jx
+    let dy = vy - fs * jy
+    if (dx * dx + dy * dy < 1e-24 * jn2) {
+      // the ray hit the foot itself: either way along the edge climbs
+      dx = -jy
+      dy = jx
+    }
+    const dn = Math.hypot(dx, dy)
+    let u = Infinity
+    for (let p = p0; p < p1; p++) {
+      if (p === j) continue
+      const px = lines[3 * p]
+      const py = lines[3 * p + 1]
+      const den = px * dx + py * dy
+      if (den > 1e-12 * Math.hypot(px, py) * dn) {
+        const up = (lines[3 * p + 2] - (px * vx + py * vy)) / den
+        if (up < u) u = up
+      }
+    }
+    if (Number.isFinite(u)) {
+      if (u < 0) u = 0
+      vx += u * dx
+      vy += u * dy
+    }
+  }
+  let best = -1
+  let bestD = Infinity
+  for (let v = vertStart[i]; v < vertStart[i + 1]; v++) {
+    const dx = verts[2 * v] - vx
+    const dy = verts[2 * v + 1] - vy
+    const d2 = dx * dx + dy * dy
+    if (d2 < bestD) {
+      bestD = d2
+      best = v
+    }
+  }
+  return best < 0 ? -1 : vertVor[best]
+}
+
+// The 3x domain (its outline loop) cut into pieces by the power cells: the
+// 2D analogue of buildCapPieces, with a single "facet" — the plane itself at
+// height z, the drawing layer.
+export function buildRegionPieces2D(
+  cells: PowerCells2D,
+  outline: number[][],
+  z: number,
+): CapPieces {
+  const { n, centers, lines, lineStart, basis } = cells
+  // counterclockwise outline
+  let area2 = 0
+  for (let v = 0; v < outline.length; v++) {
+    const w = (v + 1) % outline.length
+    area2 += outline[v][0] * outline[w][1] - outline[w][0] * outline[v][1]
+  }
+  const loop = area2 < 0 ? [...outline].reverse() : outline
+  let R = 0
+  for (const v of loop) R = Math.max(R, Math.hypot(v[0], v[1]))
+  let maxR = 0
+  let maxK = 0
+  for (let i = 0; i < n; i++) {
+    maxR = Math.max(maxR, cells.radius[i] + Math.hypot(centers[2 * i], centers[2 * i + 1]))
+    maxK = Math.max(maxK, lineStart[i + 1] - lineStart[i])
+  }
+  // T = Σ z_k basis[k] ⇒ |z_k| <= |row k of the inverse| · |T|
+  const det = basis[0][0] * basis[1][1] - basis[1][0] * basis[0][1]
+  const zMax = [
+    Math.ceil((Math.hypot(basis[1][1], basis[1][0]) / Math.abs(det)) * (R + maxR)),
+    Math.ceil((Math.hypot(basis[0][1], basis[0][0]) / Math.abs(det)) * (R + maxR)),
+  ]
+
+  const site: number[] = []
+  const center: number[] = []
+  const polyStart: number[] = [0]
+  const poly: number[] = []
+  const o: number[] = []
+  const rhoMin: number[] = []
+  const rhoMax: number[] = []
+  let ax = new Float64Array(loop.length + maxK + 8)
+  let ay = new Float64Array(loop.length + maxK + 8)
+  let bx = new Float64Array(loop.length + maxK + 8)
+  let by = new Float64Array(loop.length + maxK + 8)
+  for (let i = 0; i < n; i++) {
+    const p0 = lineStart[i]
+    const p1 = lineStart[i + 1]
+    const Ri = cells.radius[i]
+    if (Ri === 0) continue
+    for (let z0 = -zMax[0]; z0 <= zMax[0]; z0++)
+      for (let z1 = -zMax[1]; z1 <= zMax[1]; z1++) {
+        const sx = centers[2 * i] + z0 * basis[0][0] + z1 * basis[1][0]
+        const sy = centers[2 * i + 1] + z0 * basis[0][1] + z1 * basis[1][1]
+        if (Math.hypot(sx, sy) > Ri + R) continue
+        let m = loop.length
+        for (let v = 0; v < m; v++) {
+          ax[v] = loop[v][0]
+          ay[v] = loop[v][1]
+        }
+        // cell line n_k · (x - s) <= c_k
+        for (let p = p0; p < p1 && m >= 3; p++) {
+          const kx = lines[3 * p]
+          const ky = lines[3 * p + 1]
+          m = clip2(ax, ay, m, kx, ky, lines[3 * p + 2] + kx * sx + ky * sy, bx, by)
+          let tmp = ax
+          ax = bx
+          bx = tmp
+          tmp = ay
+          ay = by
+          by = tmp
+        }
+        m = dedupe2(ax, ay, m, (1e-9 * R) ** 2)
+        if (m < 3) continue
+        let area = 0
+        for (let v = 0; v < m; v++) {
+          const w = v + 1 === m ? 0 : v + 1
+          area += ax[v] * ay[w] - ax[w] * ay[v]
+        }
+        if (!(area > 1e-14 * R * R)) continue
+        const [rmin, rmax] = pieceReach(ax, ay, m, sx, sy)
+        site.push(i)
+        center.push(sx, sy, z)
+        for (let v = 0; v < m; v++) poly.push(ax[v], ay[v])
+        polyStart.push(poly.length / 2)
+        o.push(sx, sy)
+        rhoMin.push(rmin)
+        rhoMax.push(rmax)
+      }
+  }
+  return {
+    count: site.length,
+    site: Uint32Array.from(site),
+    center: Float64Array.from(center),
+    facet: new Uint32Array(site.length),
+    frames: Float64Array.from([0, 0, z, 1, 0, 0, 0, 1, 0, 0, 0, 1]),
+    polyStart: Uint32Array.from(polyStart),
+    poly: Float64Array.from(poly),
+    o: Float64Array.from(o),
+    h2: new Float64Array(site.length),
+    rhoMin: Float64Array.from(rhoMin),
+    rhoMax: Float64Array.from(rhoMax),
+    wholeOwner: new Int32Array(site.length).fill(-2),
+  }
+}
+
+// The exact 2D filtration region over the 3x domain as flat triangles:
+// {pi <= level} (the disk union; voronoi false, triOwner = site) or
+// {pi >= level} (the domain minus the disks; voronoi true, triOwner = a
+// quotient Voronoi vertex of the component when `withOwners`).
+export function powerRegion2D(
+  cells: PowerCells2D,
+  pieces: CapPieces,
+  level: number,
+  voronoi: boolean,
+  withOwners: boolean,
+): IsosurfaceMesh {
+  return pieceMesh(
+    pieces,
+    cells.weights,
+    level,
+    voronoi,
+    voronoi && withOwners
+      ? (p, u, v) => ascend2D(cells, pieces.site[p], u - pieces.o[2 * p], v - pieces.o[2 * p + 1])
+      : null,
+  )
 }

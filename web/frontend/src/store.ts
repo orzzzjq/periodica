@@ -45,8 +45,9 @@ interface UiState {
   isoOpacity: number
   showIsosurfaceSup: boolean
   isoOpacitySup: number
-  // point-set mode, 3D only: exact filtration surfaces of the power distance
-  // (Delaunay ball-union boundary / Voronoi sublevel boundary)
+  // point-set mode: exact filtration surfaces of the power distance in 3D
+  // (Delaunay ball-union boundary / Voronoi sublevel boundary); in 2D
+  // showVorSurface draws the exact Voronoi sublevel region
   showDelSurface: boolean
   delSurfaceOpacity: number
   showVorSurface: boolean
