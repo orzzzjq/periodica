@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from scipy.spatial import ConvexHull
 
 from periodica import _periodica
-from periodica.core import Periodica
+from periodica.core import Periodica, grid_anchor_indices, power_grid_shape, sample_power_field
 
 app = FastAPI(title='Periodica API')
 
@@ -192,6 +192,7 @@ def compute(req: ComputeRequest):
     voronoi = None
     voronoi_error = None
     voronoi_geometry = None
+    cvp = None  # canonical Voronoi vertex positions, reused by the power field
     try:
         cvp, pv_edges, pv_pf, pv_ef, pv_shift = _periodica.periodic_voronoi(U, points, weights, True)
 
@@ -235,12 +236,32 @@ def compute(req: ComputeRequest):
     except Exception as e:
         voronoi_error = str(e)
 
+    # sampled power-distance field pi(x) = min_i(|x-p_i|^2 - w_i) over the
+    # kept sites, for the smooth filtration isosurfaces (3D only). Anchors
+    # map each quotient vertex (Delaunay: kept site; Voronoi: cvp column) to
+    # its nearest grid sample, linking surface components to the merge trees.
+    power_field = None
+    if d == 3:
+        try:
+            pf_shape = power_grid_shape(U)
+            pf_vals = sample_power_field(U, points[:, kept], weights[kept], pf_shape)
+            power_field = {
+                'shape': list(pf_shape),
+                'values': pf_vals.ravel().tolist(),
+                'delAnchors': grid_anchor_indices(U, pf_shape, canonical[:, kept]).tolist(),
+                'vorAnchors': (grid_anchor_indices(U, pf_shape, cvp).tolist()
+                               if voronoi is not None and cvp is not None else None),
+            }
+        except Exception:
+            power_field = None
+
     delaunay_desc = encode_descriptors(barcodes, images, p.tree, req.imageSize)
 
     return {
         'voronoi': voronoi,
         'voronoiError': voronoi_error,
         'voronoiGeometry': voronoi_geometry,
+        'powerField': power_field,
         'd': d,
         'basis': V[:, :d].T.tolist(),  # basis vectors as rows
         'domain1x': polytope(d, p.domain_vertices(A, b)),

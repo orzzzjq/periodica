@@ -45,6 +45,12 @@ interface UiState {
   isoOpacity: number
   showIsosurfaceSup: boolean
   isoOpacitySup: number
+  // point-set mode, 3D only: smooth filtration isosurfaces sampled from the
+  // power-distance field (Delaunay ball-union / Voronoi sublevel boundary)
+  showDelSurface: boolean
+  delSurfaceOpacity: number
+  showVorSurface: boolean
+  vorSurfaceOpacity: number
   ballOpacity: number // Delaunay filtration balls
   filtEdgeOpacity: number // Delaunay filtration edges
   coneOpacity: number // Voronoi filtration cones
@@ -234,6 +240,11 @@ export const useStore = create<State>((set, get) => {
       isoOpacity: 0.6,
       showIsosurfaceSup: true,
       isoOpacitySup: 0.6,
+      // off by default: opt-in additions on top of the balls/cones view
+      showDelSurface: false,
+      delSurfaceOpacity: 0.5,
+      showVorSurface: false,
+      vorSurfaceOpacity: 0.5,
       ballOpacity: 0.35,
       filtEdgeOpacity: 1,
       coneOpacity: 0.35,

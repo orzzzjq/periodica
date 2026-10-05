@@ -184,6 +184,91 @@ def _parse_grid_text(text):
 
     return {'d': d, 'U': U, 'values': np.array(rows).reshape(N)}
 
+
+def _nearest_copy_shifts(B, A, b):
+    """Candidate lattice shifts realizing the nearest periodic copy.
+
+    For x, p canonicalized into the Dirichlet domain D of the reduced basis
+    B, the minimizing shift satisfies x - p - lambda in the closure of D, and
+    x - p in 2D, so lambda lies in 3D. Enumerate the lattice points of the
+    closed 3x domain {A.lam <= 3b} exactly: {-1,0,1}^d is NOT always enough
+    (unbalanced Selling parameters admit shifts like 2*v1 + v2 in 3D).
+    """
+    d = B.shape[0]
+    mu = 0.5 * np.linalg.norm(B, axis=0).sum()  # covering-radius upper bound
+    zmax = np.ceil(np.linalg.norm(np.linalg.inv(B), axis=1) * 3 * mu).astype(int)
+    grids = np.meshgrid(*[np.arange(-m, m + 1) for m in zmax], indexing='ij')
+    Z = np.stack(grids, axis=0).reshape(d, -1)
+    lam = B @ Z
+    tol = 1e-9 * max(1.0, float(np.abs(b).max()))
+    return lam[:, np.all(A @ lam <= 3.0 * b[:, None] + tol, axis=0)]
+
+
+def power_grid_shape(U, budget=160_000, n_min=8, n_max=96):
+    """Sampling resolution for the power-distance field of the lattice U.
+
+    Isotropic step: the per-unit-length sampling density s solves
+    prod(round(s * L_k)) ~ budget, each axis clipped to [n_min, n_max]; if
+    clipping overshoots the budget by more than 25%, the largest axis is
+    shrunk. Long axes automatically get more samples.
+    """
+    lengths = np.linalg.norm(np.asarray(U, dtype=float), axis=0)
+    s = (budget / lengths.prod()) ** (1.0 / len(lengths))
+    N = np.clip(np.rint(s * lengths).astype(int), n_min, n_max)
+    while N.prod() > budget * 1.25 and N.max() > n_min:
+        k = int(np.argmax(N))
+        N[k] = max(n_min, int(N[k] * 0.9))
+    return tuple(int(x) for x in N)
+
+
+def sample_power_field(U, points, weights, shape):
+    """Sample pi(x) = min_i,z (|x - (p_i + B z)|^2 - w_i) on the fractional
+    grid of U: values[i1,...,id] = pi(U . (idx / N)), C order.
+
+    Sites and samples are canonicalized into the Dirichlet domain of the
+    reduced basis, so the exact candidate-shift set from _nearest_copy_shifts
+    makes the periodic minimum correct for arbitrary lattices. The inner
+    loop is a gemm: |x-c|^2 - w = (|c|^2 - w) - 2 x.c + |x|^2, with |x|^2
+    added back after the min.
+    """
+    U = np.asarray(U, dtype=float)
+    d = U.shape[0]
+    N = np.asarray(shape)
+    V = _periodica.reduced_basis(U)
+    A, b = _periodica.dirichlet_domain(V)
+    b = np.asarray(b).reshape(-1)
+    B = V[:, :d]
+    sites = _periodica.canonical_points(A, b, np.asarray(points, dtype=float))
+    w = np.asarray(weights, dtype=float).reshape(-1)
+    idx = np.indices(tuple(shape)).reshape(d, -1)
+    X = _periodica.canonical_points(A, b, U @ (idx / N[:, None]))
+    shifts = _nearest_copy_shifts(B, A, b)
+    xnorm = np.einsum('ij,ij->j', X, X)
+    best = np.empty(X.shape[1])
+    CH = 65536
+    for lo in range(0, X.shape[1], CH):
+        Xc = X[:, lo:lo + CH]
+        acc = np.full(Xc.shape[1], np.inf)
+        for s_i in range(shifts.shape[1]):
+            C = sites + shifts[:, s_i:s_i + 1]
+            pd = ((C * C).sum(axis=0) - w) - 2.0 * (Xc.T @ C)
+            np.minimum(acc, pd.min(axis=1), out=acc)
+        best[lo:lo + CH] = acc
+    return (best + xnorm).reshape(tuple(shape))
+
+
+def grid_anchor_indices(U, shape, positions):
+    """Ravel indices (C order) of the fractional grid points of U nearest to
+    the given real positions (d x m). Positions may lie outside the unit
+    cell; the field and grid are U-periodic, so wrapping mod 1 is exact."""
+    N = np.asarray(shape)
+    frac = np.mod(np.linalg.solve(np.asarray(U, dtype=float),
+                                  np.asarray(positions, dtype=float)), 1.0)
+    # rint can land exactly on N, so wrap again
+    idx = np.mod(np.rint(frac * N[:, None]).astype(int), N[:, None])
+    return np.ravel_multi_index(idx, tuple(shape))
+
+
 class Periodica:
     # Stand-in for symbolic perturbation: exactly degenerate inputs (e.g.
     # cocircular quadruples) are triangulated inconsistently across lattice

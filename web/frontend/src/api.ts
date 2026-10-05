@@ -107,6 +107,16 @@ export interface ComputeResponse {
   // Grid points are canonicalized into the Dirichlet cell and tiled over the
   // 3x domain like the Delaunay points; arcs are resolved segments with the
   // quotient vertex ids of their endpoints.
+  // 3D point sets only: the power distance pi(x) = min_i(|x-p_i|^2 - w_i)
+  // over kept sites, sampled on the C-order fractional grid of the computed
+  // lattice. Anchors map quotient vertices (Delaunay: kept site index;
+  // Voronoi: canonical Voronoi vertex index) to their nearest grid sample.
+  powerField?: {
+    shape: number[]
+    values: number[]
+    delAnchors: number[]
+    vorAnchors: number[] | null // null if the Voronoi pass failed
+  } | null
   grid?: {
     shape: number[]
     values: number[] // per quotient vertex, C order

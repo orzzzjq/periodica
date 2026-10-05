@@ -410,6 +410,285 @@ export function labelSublevelComponents(
   return parent
 }
 
+// ---- domain-boundary caps (solid sublevel sets) ------------------------------
+
+// Trilinear sample of the periodic field at fractional coordinates (mod 1).
+function trilinear(field: GridField, f1: number, f2: number, f3: number): number {
+  const [N1, N2, N3] = field.shape
+  const v = field.values
+  const s1 = N2 * N3
+  const u1 = (f1 - Math.floor(f1)) * N1
+  const u2 = (f2 - Math.floor(f2)) * N2
+  const u3 = (f3 - Math.floor(f3)) * N3
+  const i = Math.floor(u1) % N1
+  const j = Math.floor(u2) % N2
+  const k = Math.floor(u3) % N3
+  const a = u1 - Math.floor(u1)
+  const b = u2 - Math.floor(u2)
+  const c = u3 - Math.floor(u3)
+  const i1 = i + 1 === N1 ? 0 : i + 1
+  const j1 = j + 1 === N2 ? 0 : j + 1
+  const k1 = k + 1 === N3 ? 0 : k + 1
+  const c00 = v[i * s1 + j * N3 + k] * (1 - a) + v[i1 * s1 + j * N3 + k] * a
+  const c10 = v[i * s1 + j1 * N3 + k] * (1 - a) + v[i1 * s1 + j1 * N3 + k] * a
+  const c01 = v[i * s1 + j * N3 + k1] * (1 - a) + v[i1 * s1 + j * N3 + k1] * a
+  const c11 = v[i * s1 + j1 * N3 + k1] * (1 - a) + v[i1 * s1 + j1 * N3 + k1] * a
+  return (c00 * (1 - b) + c10 * b) * (1 - c) + (c01 * (1 - b) + c11 * b) * c
+}
+
+// Caps that close the sublevel solid where the 3x Dirichlet domain cuts it:
+// on each domain facet, the filled region {f <= t} is triangulated by filled
+// marching squares over a 2D grid on the facet plane (the periodic field is
+// sampled trilinearly; the facet outline enters as the max with the other
+// halfspace violations, so caps terminate at the polytope edges). The result
+// is an IsosurfaceMesh in WORLD space (not instanced — the domain boundary
+// is not periodic), with triOwner = nearest 3D grid node of each triangle's
+// centroid so the component split works exactly like the surface's.
+export function buildDomainCaps(
+  field: GridField,
+  U: number[][],
+  domainA: number[][],
+  domainB: number[],
+  domainVertices: number[][],
+  threshold: number,
+): IsosurfaceMesh {
+  const [N1, N2, N3] = field.shape
+  const Uinv = inverse3(U)
+  const frac = (x: number, y: number, z: number): [number, number, number] => [
+    Uinv[0][0] * x + Uinv[0][1] * y + Uinv[0][2] * z,
+    Uinv[1][0] * x + Uinv[1][1] * y + Uinv[1][2] * z,
+    Uinv[2][0] * x + Uinv[2][1] * y + Uinv[2][2] * z,
+  ]
+  // 2D grid step matching the 3D sampling step (mismatched steps open
+  // visible gaps where the cap meets the clipped surface)
+  const h =
+    (Math.hypot(U[0][0], U[1][0], U[2][0]) / N1 +
+      Math.hypot(U[0][1], U[1][1], U[2][1]) / N2 +
+      Math.hypot(U[0][2], U[1][2], U[2][2]) / N3) /
+    3
+
+  const positions: number[] = []
+  const normals: number[] = []
+  const owners: number[] = []
+  const bScale = Math.max(1, Math.abs(Math.max(...domainB)))
+
+  for (let fi = 0; fi < domainA.length; fi++) {
+    const a = domainA[fi]
+    const an = Math.hypot(a[0], a[1], a[2])
+    const n = [a[0] / an, a[1] / an, a[2] / an]
+    const dPlane = (3 * domainB[fi]) / an
+    // facet polygon vertices: domain vertices lying on this plane
+    const onPlane = domainVertices.filter(
+      (v) => Math.abs(a[0] * v[0] + a[1] * v[1] + a[2] * v[2] - 3 * domainB[fi]) < 1e-6 * bScale * an,
+    )
+    if (onPlane.length < 3) continue
+    // in-plane orthonormal basis (right-handed with n, so the walk below is
+    // counterclockwise seen from outside)
+    const ax = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]
+    const e1raw = [
+      ax[0] - (ax[0] * n[0] + ax[1] * n[1] + ax[2] * n[2]) * n[0],
+      ax[1] - (ax[0] * n[0] + ax[1] * n[1] + ax[2] * n[2]) * n[1],
+      ax[2] - (ax[0] * n[0] + ax[1] * n[1] + ax[2] * n[2]) * n[2],
+    ]
+    const e1n = Math.hypot(e1raw[0], e1raw[1], e1raw[2])
+    const e1 = [e1raw[0] / e1n, e1raw[1] / e1n, e1raw[2] / e1n]
+    const e2 = [
+      n[1] * e1[2] - n[2] * e1[1],
+      n[2] * e1[0] - n[0] * e1[2],
+      n[0] * e1[1] - n[1] * e1[0],
+    ]
+    const p0 = [n[0] * dPlane, n[1] * dPlane, n[2] * dPlane]
+    let sMin = Infinity
+    let sMax = -Infinity
+    let tMin = Infinity
+    let tMax = -Infinity
+    for (const v of onPlane) {
+      const dx = v[0] - p0[0]
+      const dy = v[1] - p0[1]
+      const dz = v[2] - p0[2]
+      const s = dx * e1[0] + dy * e1[1] + dz * e1[2]
+      const t = dx * e2[0] + dy * e2[1] + dz * e2[2]
+      sMin = Math.min(sMin, s)
+      sMax = Math.max(sMax, s)
+      tMin = Math.min(tMin, t)
+      tMax = Math.max(tMax, t)
+    }
+    sMin -= h
+    sMax += h
+    tMin -= h
+    tMax += h
+    const Ms = Math.min(160, Math.max(2, Math.ceil((sMax - sMin) / h)))
+    const Mt = Math.min(160, Math.max(2, Math.ceil((tMax - tMin) / h)))
+    const ds = (sMax - sMin) / Ms
+    const dt = (tMax - tMin) / Mt
+
+    // node values of g = max(f - threshold, other halfspace violations):
+    // g <= 0 exactly on the solid's cross-section with this facet
+    const gv = new Float64Array((Ms + 1) * (Mt + 1))
+    const px = new Float64Array((Ms + 1) * (Mt + 1))
+    const py = new Float64Array((Ms + 1) * (Mt + 1))
+    const pz = new Float64Array((Ms + 1) * (Mt + 1))
+    for (let is = 0; is <= Ms; is++) {
+      const s = sMin + is * ds
+      for (let it = 0; it <= Mt; it++) {
+        const t = tMin + it * dt
+        const x = p0[0] + s * e1[0] + t * e2[0]
+        const y = p0[1] + s * e1[1] + t * e2[1]
+        const z = p0[2] + s * e1[2] + t * e2[2]
+        const [f1, f2, f3] = frac(x, y, z)
+        let g = trilinear(field, f1, f2, f3) - threshold
+        for (let j = 0; j < domainA.length; j++) {
+          if (j === fi) continue
+          const aj = domainA[j]
+          const viol = aj[0] * x + aj[1] * y + aj[2] * z - 3 * domainB[j]
+          if (viol > g) g = viol
+        }
+        const id = is * (Mt + 1) + it
+        gv[id] = g
+        px[id] = x
+        py[id] = y
+        pz[id] = z
+      }
+    }
+
+    // filled marching squares: walk each cell boundary counterclockwise,
+    // keeping inside corners and edge crossings; fan-triangulate the polygon
+    const poly: number[][] = []
+    for (let is = 0; is < Ms; is++) {
+      for (let it = 0; it < Mt; it++) {
+        const c = [
+          is * (Mt + 1) + it,
+          (is + 1) * (Mt + 1) + it,
+          (is + 1) * (Mt + 1) + it + 1,
+          is * (Mt + 1) + it + 1,
+        ]
+        poly.length = 0
+        for (let e = 0; e < 4; e++) {
+          const ia = c[e]
+          const ib = c[(e + 1) % 4]
+          const ga = gv[ia]
+          const gb = gv[ib]
+          if (ga <= 0) poly.push([px[ia], py[ia], pz[ia]])
+          if ((ga <= 0) !== (gb <= 0)) {
+            const w = ga / (ga - gb)
+            poly.push([
+              px[ia] + w * (px[ib] - px[ia]),
+              py[ia] + w * (py[ib] - py[ia]),
+              pz[ia] + w * (pz[ib] - pz[ia]),
+            ])
+          }
+        }
+        if (poly.length < 3) continue
+        for (let v = 1; v + 1 < poly.length; v++) {
+          const tri = [poly[0], poly[v], poly[v + 1]]
+          const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3
+          const cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3
+          const cz = (tri[0][2] + tri[1][2] + tri[2][2]) / 3
+          const [f1, f2, f3] = frac(cx, cy, cz)
+          const g1 = ((Math.round((f1 - Math.floor(f1)) * N1) % N1) + N1) % N1
+          const g2 = ((Math.round((f2 - Math.floor(f2)) * N2) % N2) + N2) % N2
+          const g3 = ((Math.round((f3 - Math.floor(f3)) * N3) % N3) + N3) % N3
+          owners.push(g1 * N2 * N3 + g2 * N3 + g3)
+          for (const p of tri) {
+            positions.push(p[0], p[1], p[2])
+            normals.push(n[0], n[1], n[2]) // outward: the solid lies behind
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    positions: Float32Array.from(positions),
+    normals: Float32Array.from(normals),
+    triOwner: Uint32Array.from(owners),
+    triangleCount: owners.length,
+  }
+}
+
+// ---- axis-adjacency component labeling (sampled fields) ---------------------
+
+// Union-find over the grid's implicit wrapped AXIS adjacency: u ~ v iff both
+// values are <= threshold and the points differ by +1 (mod N) along one
+// axis. Used for sampled fields (e.g. the power-distance field of a point
+// set) where no quotient-complex arc list exists. Returns fully
+// path-compressed roots: roots[v] === roots[roots[v]].
+export function labelAxisComponents(
+  shape: number[],
+  values: Float64Array,
+  threshold: number,
+): Int32Array {
+  const [N1, N2, N3] = shape
+  const n = N1 * N2 * N3
+  const s1 = N2 * N3
+  const parent = new Int32Array(n)
+  for (let v = 0; v < n; v++) parent[v] = v
+  const size = new Int32Array(n).fill(1)
+  const find = (v: number) => {
+    while (parent[v] !== v) {
+      parent[v] = parent[parent[v]] // path halving
+      v = parent[v]
+    }
+    return v
+  }
+  const union = (u: number, w: number) => {
+    const a = find(u)
+    const b = find(w)
+    if (a === b) return
+    if (size[a] < size[b]) {
+      parent[a] = b
+      size[b] += size[a]
+    } else {
+      parent[b] = a
+      size[a] += size[b]
+    }
+  }
+  let v = 0
+  for (let i = 0; i < N1; i++) {
+    const iN = (i + 1 === N1 ? 0 : i + 1) * s1
+    for (let j = 0; j < N2; j++) {
+      const row = i * s1 + j * N3
+      const jN = i * s1 + (j + 1 === N2 ? 0 : j + 1) * N3
+      for (let k = 0; k < N3; k++, v++) {
+        if (values[v] > threshold) continue
+        if (values[iN + j * N3 + k] <= threshold) union(v, iN + j * N3 + k)
+        if (values[jN + k] <= threshold) union(v, jN + k)
+        const kN = k + 1 === N3 ? 0 : k + 1
+        if (values[row + kN] <= threshold) union(v, row + kN)
+      }
+    }
+  }
+  for (let u = 0; u < n; u++) parent[u] = find(u)
+  return parent
+}
+
+// Anchor grid id -> a grid id usable for component lookup: the anchor itself
+// when it is inside the sublevel set, else the first of its 26 wrapped
+// neighbors that is; -1 when none is (the anchored feature is too small for
+// the sampling resolution — its surface patch is not rendered yet either).
+export function resolveAnchor(
+  shape: number[],
+  values: Float64Array,
+  anchor: number,
+  threshold: number,
+): number {
+  if (values[anchor] <= threshold) return anchor
+  const [N1, N2, N3] = shape
+  const s1 = N2 * N3
+  const i = Math.floor(anchor / s1)
+  const j = Math.floor(anchor / N3) % N2
+  const k = anchor % N3
+  for (let di = -1; di <= 1; di++)
+    for (let dj = -1; dj <= 1; dj++)
+      for (let dk = -1; dk <= 1; dk++) {
+        if (di === 0 && dj === 0 && dk === 0) continue
+        const id =
+          ((i + di + N1) % N1) * s1 + ((j + dj + N2) % N2) * N3 + ((k + dk + N3) % N3)
+        if (values[id] <= threshold) return id
+      }
+  return -1
+}
+
 // ---- included/ghost split (the only step rerun on a filter change) ----------
 
 // Splits the mesh triangles by whether their component (the sublevel

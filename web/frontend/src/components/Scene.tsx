@@ -6,11 +6,15 @@ import type { Line2 } from 'three-stdlib'
 import { inDirichletDomain, type ComputeResponse, type Polytope2D, type Polytope3D } from '../api'
 import { captureRegistry } from '../capture'
 import {
+  buildDomainCaps,
   buildGridField,
   inverse3,
+  labelAxisComponents,
   labelSublevelComponents,
   marchingCubes,
+  resolveAnchor,
   splitTriangles,
+  type IsosurfaceMesh,
 } from '../marchingCubes'
 import { useStore } from '../store'
 
@@ -493,6 +497,174 @@ function latticeTranslates3x(results: ComputeResponse, U: number[][]): [number, 
   return out
 }
 
+// Dirichlet 3x-domain clipping planes for the isosurface materials:
+// keep A·x <= 3b ⇔ (−A_i/|A_i|)·x + 3b_i/|A_i| >= 0 (three clips distance < 0)
+function useDomainClipPlanes(results: ComputeResponse, enabled: boolean): THREE.Plane[] {
+  return useMemo(
+    () =>
+      enabled
+        ? results.domainA.map((row, i) => {
+            const n = Math.hypot(row[0], row[1], row[2])
+            return new THREE.Plane(
+              new THREE.Vector3(-row[0] / n, -row[1] / n, -row[2] / n),
+              (3 * results.domainB[i]) / n,
+            )
+          })
+        : [],
+    [results, enabled],
+  )
+}
+
+type IsoGeos = { included: THREE.BufferGeometry; ghost: THREE.BufferGeometry | null } | null
+
+// Included/ghost geometries from an isosurface mesh: position/normal
+// attributes are shared, so a filter change swaps only the index buffers.
+// `filtered` ids live in the same space as roots/triOwner.
+function makeIsoGeos(
+  mesh: IsosurfaceMesh | null,
+  roots: Int32Array | null,
+  filtered: Set<number> | null,
+): IsoGeos {
+  if (!mesh || mesh.triangleCount === 0) return null
+  const pos = new THREE.BufferAttribute(mesh.positions, 3)
+  const nrm = new THREE.BufferAttribute(mesh.normals, 3)
+  const included = new THREE.BufferGeometry()
+  included.setAttribute('position', pos)
+  included.setAttribute('normal', nrm)
+  let ghost: THREE.BufferGeometry | null = null
+  if (filtered && roots) {
+    const split = splitTriangles(mesh, roots, filtered)
+    if (split.includedIndex) included.setIndex(new THREE.BufferAttribute(split.includedIndex, 1))
+    if (split.ghostIndex.length > 0) {
+      ghost = new THREE.BufferGeometry()
+      ghost.setAttribute('position', pos)
+      ghost.setAttribute('normal', nrm)
+      ghost.setIndex(new THREE.BufferAttribute(split.ghostIndex, 1))
+    }
+  }
+  return { included, ghost }
+}
+
+// Presentational half of the isosurfaces: glossy translucent surface
+// instanced over the lattice translates covering the 3x domain and clipped
+// to it, plus the world-space caps that close the solid where the domain
+// boundary cuts it (slightly darkened, the classic cut-surface look), with
+// the ghost geometries at low opacity. Geometry DISPOSAL stays with the
+// wrapper that created it.
+function IsosurfaceMeshes({
+  geos,
+  capGeos,
+  translates,
+  planes,
+  color,
+  opacity,
+}: {
+  geos: IsoGeos
+  capGeos: IsoGeos
+  translates: [number, number, number][]
+  planes: THREE.Plane[]
+  color: string
+  opacity: number
+}) {
+  const inclRef = useRef<THREE.InstancedMesh>(null)
+  const ghostRef = useRef<THREE.InstancedMesh>(null)
+  const capColor = useMemo(
+    () => '#' + new THREE.Color(color).multiplyScalar(0.72).getHexString(),
+    [color],
+  )
+
+  // instance matrices are pure translations, independent of the threshold;
+  // refilled when the translate list or a mesh (re)mounts
+  const nT = translates.length
+  useEffect(() => {
+    const m = new THREE.Matrix4()
+    for (const ref of [inclRef, ghostRef]) {
+      if (!ref.current) continue
+      for (let i = 0; i < nT; i++) {
+        m.makeTranslation(translates[i][0], translates[i][1], translates[i][2])
+        ref.current.setMatrixAt(i, m)
+      }
+      ref.current.instanceMatrix.needsUpdate = true
+    }
+  }, [translates, nT, geos])
+
+  if ((!geos && !capGeos) || nT === 0) return null
+  return (
+    // renderOrder −1: draw before the other transparents so ghost points and
+    // edge lines composite on top of the surface
+    <>
+      {geos && (
+        <instancedMesh
+          key={`iso-${nT}`}
+          ref={inclRef}
+          args={[undefined, undefined, nT]}
+          geometry={geos.included}
+          frustumCulled={false}
+          renderOrder={-1}
+        >
+          <meshPhongMaterial
+            color={color}
+            specular="#777777"
+            shininess={100}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={opacity}
+            depthWrite={opacity > 0.99}
+            clippingPlanes={planes}
+          />
+        </instancedMesh>
+      )}
+      {geos?.ghost && (
+        <instancedMesh
+          key={`iso-ghost-${nT}`}
+          ref={ghostRef}
+          args={[undefined, undefined, nT]}
+          geometry={geos.ghost}
+          frustumCulled={false}
+          renderOrder={-1}
+        >
+          <meshPhongMaterial
+            color={color}
+            specular="#777777"
+            shininess={100}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={Math.min(0.1, opacity * 0.25)}
+            depthWrite={false}
+            clippingPlanes={planes}
+          />
+        </instancedMesh>
+      )}
+      {capGeos && (
+        <mesh geometry={capGeos.included} frustumCulled={false} renderOrder={-1}>
+          <meshPhongMaterial
+            color={capColor}
+            specular="#555555"
+            shininess={60}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={opacity}
+            depthWrite={opacity > 0.99}
+          />
+        </mesh>
+      )}
+      {capGeos?.ghost && (
+        <mesh geometry={capGeos.ghost} frustumCulled={false} renderOrder={-1}>
+          <meshPhongMaterial
+            color={capColor}
+            specular="#555555"
+            shininess={60}
+            side={THREE.DoubleSide}
+            transparent
+            opacity={Math.min(0.1, opacity * 0.25)}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
+    </>
+  )
+}
+
 // Sublevel-set isosurface of the grid field at the slider threshold (3D
 // only): marching cubes over the periodic grid in index space, mapped by U,
 // rendered as a glossy surface instanced over the lattice translates that
@@ -517,8 +689,6 @@ function GridIsosurface({
   // the lattice that produced these results (grid geometry is built from U,
   // not the reduced basis; inputs.lattice may have been edited since)
   const U = useStore((s) => s.computedLattice)
-  const inclRef = useRef<THREE.InstancedMesh>(null)
-  const ghostRef = useRef<THREE.InstancedMesh>(null)
 
   const vals = useMemo(
     () => (g && negate ? g.values.map((v) => -v) : (g?.values ?? null)),
@@ -543,20 +713,7 @@ function GridIsosurface({
     () => (U && is3d ? latticeTranslates3x(results, U) : []),
     [results, U, is3d],
   )
-  // keep A·x <= 3b ⇔ (−A_i/|A_i|)·x + 3b_i/|A_i| >= 0 (three clips distance < 0)
-  const planes = useMemo(
-    () =>
-      is3d
-        ? results.domainA.map((row, i) => {
-            const n = Math.hypot(row[0], row[1], row[2])
-            return new THREE.Plane(
-              new THREE.Vector3(-row[0] / n, -row[1] / n, -row[2] / n),
-              (3 * results.domainB[i]) / n,
-            )
-          })
-        : [],
-    [results, is3d],
-  )
+  const planes = useDomainClipPlanes(results, is3d)
 
   // radiusVor defaults to -Infinity ("at the slider minimum"): no surface
   const finite = Number.isFinite(radius)
@@ -570,99 +727,140 @@ function GridIsosurface({
     () => (g && verts && finite ? labelSublevelComponents(sortedArcs, g.values.length, t) : null),
     [g, sortedArcs, t, verts, finite],
   )
-  // position/normal attributes are shared by the included and ghost
-  // geometries; a filter change swaps only the index buffers
-  const geos = useMemo(() => {
-    if (!mesh || mesh.triangleCount === 0) return null
-    const pos = new THREE.BufferAttribute(mesh.positions, 3)
-    const nrm = new THREE.BufferAttribute(mesh.normals, 3)
-    const included = new THREE.BufferGeometry()
-    included.setAttribute('position', pos)
-    included.setAttribute('normal', nrm)
-    let ghost: THREE.BufferGeometry | null = null
-    if (verts && roots) {
-      const split = splitTriangles(mesh, roots, verts)
-      if (split.includedIndex) included.setIndex(new THREE.BufferAttribute(split.includedIndex, 1))
-      if (split.ghostIndex.length > 0) {
-        ghost = new THREE.BufferGeometry()
-        ghost.setAttribute('position', pos)
-        ghost.setAttribute('normal', nrm)
-        ghost.setIndex(new THREE.BufferAttribute(split.ghostIndex, 1))
-      }
-    }
-    return { included, ghost }
-  }, [mesh, roots, verts])
+  const geos = useMemo(() => makeIsoGeos(mesh, roots, verts), [mesh, roots, verts])
+  // caps close the solid where the 3x domain boundary cuts the sublevel set
+  const capMesh = useMemo(
+    () =>
+      field && U && finite
+        ? buildDomainCaps(field, U, results.domainA, results.domainB, results.domain3x.vertices, t)
+        : null,
+    [field, U, finite, t, results],
+  )
+  const capGeos = useMemo(() => makeIsoGeos(capMesh, roots, verts), [capMesh, roots, verts])
 
   useEffect(() => {
-    if (!geos) return
     return () => {
-      geos.included.dispose()
-      geos.ghost?.dispose()
-    }
-  }, [geos])
-
-  // instance matrices are pure translations, independent of the threshold;
-  // refilled when the translate list or a mesh (re)mounts
-  const nT = translates.length
-  useEffect(() => {
-    const m = new THREE.Matrix4()
-    for (const ref of [inclRef, ghostRef]) {
-      if (!ref.current) continue
-      for (let i = 0; i < nT; i++) {
-        m.makeTranslation(translates[i][0], translates[i][1], translates[i][2])
-        ref.current.setMatrixAt(i, m)
+      for (const gs of [geos, capGeos]) {
+        gs?.included.dispose()
+        gs?.ghost?.dispose()
       }
-      ref.current.instanceMatrix.needsUpdate = true
     }
-  }, [translates, nT, geos])
+  }, [geos, capGeos])
 
-  if (!g || !is3d || !geos || nT === 0) return null
-  const color = negate ? ISO_COLOR_SUP : ISO_COLOR
+  if (!g || !is3d) return null
   return (
-    // renderOrder −1: draw before the other transparents so ghost points and
-    // edge lines composite on top of the surface
-    <>
-      <instancedMesh
-        key={`iso-${nT}`}
-        ref={inclRef}
-        args={[undefined, undefined, nT]}
-        geometry={geos.included}
-        frustumCulled={false}
-        renderOrder={-1}
-      >
-        <meshPhongMaterial
-          color={color}
-          specular="#777777"
-          shininess={100}
-          side={THREE.DoubleSide}
-          transparent
-          opacity={opacity}
-          depthWrite={opacity > 0.99}
-          clippingPlanes={planes}
-        />
-      </instancedMesh>
-      {geos.ghost && (
-        <instancedMesh
-          key={`iso-ghost-${nT}`}
-          ref={ghostRef}
-          args={[undefined, undefined, nT]}
-          geometry={geos.ghost}
-          frustumCulled={false}
-          renderOrder={-1}
-        >
-          <meshPhongMaterial
-            color={color}
-            specular="#777777"
-            shininess={100}
-            side={THREE.DoubleSide}
-            transparent
-            opacity={Math.min(0.1, opacity * 0.25)}
-            depthWrite={false}
-            clippingPlanes={planes}
-          />
-        </instancedMesh>
-      )}
-    </>
+    <IsosurfaceMeshes
+      geos={geos}
+      capGeos={capGeos}
+      translates={translates}
+      planes={planes}
+      color={negate ? ISO_COLOR_SUP : ISO_COLOR}
+      opacity={opacity}
+    />
+  )
+}
+
+// Smooth filtration isosurfaces for 3D point sets, from the sampled power
+// distance pi(x) = min_i(|x-p_i|^2 - w_i): the sublevel surface at f_Del is
+// the boundary of the Delaunay ball union; with negate, the sublevel surface
+// of -pi at f_Vor bounds the Voronoi-filtration sublevel set. Components are
+// linked to the merge trees through the anchors: the far region retracts
+// onto the sublevel Voronoi subcomplex, so a surface patch is shown iff its
+// axis-connected grid component contains the anchor of a filtered quotient
+// vertex (sites for the Delaunay channel, Voronoi vertices for the Voronoi
+// channel).
+function PowerIsosurface({
+  results,
+  radius,
+  negate = false,
+}: {
+  results: ComputeResponse
+  radius: number
+  negate?: boolean
+}) {
+  const pf = results.powerField
+  const is3d = results.d === 3
+  const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
+  const opacity = useStore((s) => (negate ? s.ui.vorSurfaceOpacity : s.ui.delSurfaceOpacity))
+  const U = useStore((s) => s.computedLattice)
+
+  const vals = useMemo(
+    () => (pf && negate ? pf.values.map((v) => -v) : (pf?.values ?? null)),
+    [pf, negate],
+  )
+  const field = useMemo(
+    () => (pf && vals && U && is3d ? buildGridField(pf.shape, vals, U) : null),
+    [pf, vals, U, is3d],
+  )
+  const translates = useMemo(
+    () => (U && is3d ? latticeTranslates3x(results, U) : []),
+    [results, U, is3d],
+  )
+  const planes = useDomainClipPlanes(results, is3d)
+
+  const finite = Number.isFinite(radius) // radiusVor defaults to -Infinity
+  const t = radius + filtEps(radius)
+  const mesh = useMemo(
+    () => (field && finite ? marchingCubes(field, t) : null),
+    [field, finite, t],
+  )
+  // labeling runs on the sampled grid's axis adjacency, only while a
+  // subtree filter is active
+  const roots = useMemo(
+    () => (field && verts && finite ? labelAxisComponents(field.shape, field.values, t) : null),
+    [field, t, verts, finite],
+  )
+  // filtered quotient vertices -> their grid anchors (resolved into the
+  // sublevel set); feeds splitTriangles in grid-id space like roots/triOwner
+  const filteredGridIds = useMemo(() => {
+    if (!pf || !field || !verts || !finite) return null
+    const anchors = negate ? pf.vorAnchors : pf.delAnchors
+    if (!anchors) return null
+    const out = new Set<number>()
+    for (const v of verts) {
+      const a = anchors[v]
+      if (a === undefined) continue
+      const gid = resolveAnchor(field.shape, field.values, a, t)
+      if (gid >= 0) out.add(gid)
+    }
+    return out
+  }, [pf, field, verts, negate, t, finite])
+  const geos = useMemo(
+    () => makeIsoGeos(mesh, roots, filteredGridIds),
+    [mesh, roots, filteredGridIds],
+  )
+  // caps close the solid where the 3x domain boundary cuts the sublevel set
+  const capMesh = useMemo(
+    () =>
+      field && U && finite
+        ? buildDomainCaps(field, U, results.domainA, results.domainB, results.domain3x.vertices, t)
+        : null,
+    [field, U, finite, t, results],
+  )
+  const capGeos = useMemo(
+    () => makeIsoGeos(capMesh, roots, filteredGridIds),
+    [capMesh, roots, filteredGridIds],
+  )
+
+  useEffect(() => {
+    return () => {
+      for (const gs of [geos, capGeos]) {
+        gs?.included.dispose()
+        gs?.ghost?.dispose()
+      }
+    }
+  }, [geos, capGeos])
+
+  if (!pf || !is3d) return null
+  return (
+    <IsosurfaceMeshes
+      geos={geos}
+      capGeos={capGeos}
+      translates={translates}
+      planes={planes}
+      color={negate ? ISO_COLOR_SUP : ISO_COLOR}
+      opacity={opacity}
+    />
   )
 }
 
@@ -1430,6 +1628,12 @@ export default function Scene() {
           {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
           {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
           {ui.showVoronoiBalls && <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />}
+          {!is2d && ui.showDelSurface && results.powerField && (
+            <PowerIsosurface results={results} radius={ui.radius} />
+          )}
+          {!is2d && ui.showVorSurface && results.powerField?.vorAnchors && (
+            <PowerIsosurface results={results} radius={ui.radiusVor} negate />
+          )}
         </>
       )}
     </Canvas>
@@ -1455,6 +1659,13 @@ const FILTRATION_TOGGLES = [
   { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)', opacityKey: 'filtEdgeOpacity' },
   { key: 'showVoronoiBalls', label: 'Voronoi filtration (cones)', opacityKey: 'coneOpacity' },
   { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
+] as const
+
+// the power-field isosurfaces exist only in 3D point-set mode
+const FILTRATION_TOGGLES_3D = [
+  ...FILTRATION_TOGGLES,
+  { key: 'showDelSurface', label: 'Delaunay filtration (surface)', opacityKey: 'delSurfaceOpacity' },
+  { key: 'showVorSurface', label: 'Voronoi filtration (surface)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
 // grid mode renders only points/skeleton/sublevel edges (plus the shared
@@ -1489,7 +1700,9 @@ export function DisplayOptions() {
     ? is3d
       ? GRID_FILTRATION_TOGGLES_3D
       : GRID_FILTRATION_TOGGLES
-    : FILTRATION_TOGGLES
+    : is3d
+      ? FILTRATION_TOGGLES_3D
+      : FILTRATION_TOGGLES
   return (
     <div className="popup-control">
       <button className={open ? 'active' : ''} onClick={() => setOpen(!open)}>
