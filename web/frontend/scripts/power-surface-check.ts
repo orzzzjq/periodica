@@ -480,6 +480,7 @@ async function runCase2D(name: string, lattice: number[][], nPts: number, wMax: 
     // 3. each region on its side of the level, inside the domain
     let wrongSide = 0
     let outside = 0
+    let wrongSite = 0
     let aDel = 0
     let aVor = 0
     for (const [mesh, sign] of [[del, 1], [vorMesh, -1]] as const) {
@@ -491,12 +492,16 @@ async function runCase2D(name: string, lattice: number[][], nPts: number, wMax: 
         if (a < 1e-10) continue
         const x = (mesh.positions[o] + mesh.positions[o + 3] + mesh.positions[o + 6]) / 3
         const y = (mesh.positions[o + 1] + mesh.positions[o + 4] + mesh.positions[o + 7]) / 3
-        if (sign * (power(x, y)[0] - level) > sideTol) wrongSide++
+        const [pi, nearest] = power(x, y)
+        // the disk-union part is owned by the site whose disk it lies in
+        if (sign > 0 && mesh.triOwner[t] !== nearest) wrongSite++
+        if (sign * (pi - level) > sideTol) wrongSide++
         if (!r.domainA.every((q: number[], h: number) => q[0] * x + q[1] * y <= 3 * r.domainB[h] + 1e-6)) outside++
       }
     }
     check(wrongSide === 0, `${tag}: ${wrongSide} triangles on the wrong side of the level`)
     check(outside === 0, `${tag}: ${outside} triangles outside the 3x domain`)
+    check(wrongSite === 0, `${tag}: ${wrongSite} disk-union triangles not owned by their nearest site`)
     // 4. the two regions split the domain, in the sampled proportion
     check(
       Math.abs(aDel + aVor - domainArea) < 2e-3 * domainArea,

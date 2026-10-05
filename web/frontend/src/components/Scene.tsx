@@ -893,9 +893,10 @@ function PowerIsosurface({
   )
 }
 
-// 2D drawing layer of the exact Voronoi region: above the Delaunay balls
-// (-0.01), below the cones (CONE_Z)
-const REGION_Z = -0.0095
+// 2D drawing layers of the exact filtration regions: each just below its
+// own family's approximate overlay (Delaunay balls at -0.01, cones at CONE_Z)
+const REGION_Z_DEL = -0.0105
+const REGION_Z_VOR = -0.0095
 
 interface PowerGeometry2D {
   cells: PowerCells2D
@@ -922,7 +923,8 @@ function powerGeometry2D(results: ComputeResponse): PowerGeometry2D {
     })
     g = {
       cells,
-      pieces: buildRegionPieces2D(cells, (results.domain3x as Polytope2D).outline, REGION_Z),
+      // in the z = 0 plane; each channel's mesh is lifted to its own layer
+      pieces: buildRegionPieces2D(cells, (results.domain3x as Polytope2D).outline, 0),
       nVor: vor.length,
     }
     powerGeometry2DCache.set(results, g)
@@ -930,33 +932,47 @@ function powerGeometry2D(results: ComputeResponse): PowerGeometry2D {
   return g
 }
 
-// Exact Voronoi filtration region for 2D point sets: the sublevel set
-// {pi >= -f_Vor} of the power distance is the plane minus the disk union,
-// drawn over the 3x domain as each power cell's part of the domain minus
-// its own disk (see powerSurface.ts). The pieces never overlap, so the flat
-// translucent fill needs no stencil. Under a subtree filter, the parts
-// bounding other components are ghosted, with components labeled on the
-// arcs of the Voronoi merge tree.
-function VoronoiRegion2D({ results, radius }: { results: ComputeResponse; radius: number }) {
-  const verts = useSubtreeVerts('voronoi')
-  const opacity = useStore((s) => s.ui.vorSurfaceOpacity)
+// Exact filtration regions for 2D point sets, the flat counterpart of
+// PowerIsosurface: the sublevel set {pi <= f_Del} of the power distance is
+// the disk union, and with negate {pi >= -f_Vor} is the plane minus it.
+// Both are drawn over the 3x domain as each power cell's part of the domain
+// intersected with / minus its own disk (see powerSurface.ts). The pieces
+// never overlap, so the flat translucent fill needs no stencil. Under a
+// subtree filter, the parts of other components are ghosted, with
+// components labeled on the arcs of the matching merge tree.
+function PowerRegion2D({
+  results,
+  radius,
+  negate = false,
+}: {
+  results: ComputeResponse
+  radius: number
+  negate?: boolean
+}) {
+  const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
+  const opacity = useStore((s) => (negate ? s.ui.vorSurfaceOpacity : s.ui.delSurfaceOpacity))
   const geometry = useMemo(() => powerGeometry2D(results), [results])
-  const sortedArcs = useMemo(
-    () => [...(results.voronoiGeometry?.arcs ?? [])].sort((a, b) => a.filtration - b.filtration),
-    [results],
-  )
+  const sortedArcs = useMemo(() => {
+    const arcs = negate ? (results.voronoiGeometry?.arcs ?? []) : results.quotientArcs
+    return [...arcs].sort((a, b) => a.filtration - b.filtration)
+  }, [results, negate])
 
   const finite = Number.isFinite(radius) // radiusVor defaults to -Infinity
   const t = radius + filtEps(radius)
+  // both channels cut the same function: f_Vor lives on the -pi scale
+  const level = negate ? -t : t
   const filtering = verts !== null
   const mesh = useMemo(
-    // f_Vor lives on the -pi scale
-    () => (finite ? powerRegion2D(geometry.cells, geometry.pieces, -t, true, filtering) : null),
-    [geometry, finite, t, filtering],
+    () =>
+      finite ? powerRegion2D(geometry.cells, geometry.pieces, level, negate, filtering) : null,
+    [geometry, finite, level, negate, filtering],
   )
   const roots = useMemo(
-    () => (verts && finite ? labelSublevelComponents(sortedArcs, geometry.nVor, t) : null),
-    [geometry, sortedArcs, t, verts, finite],
+    () =>
+      verts && finite
+        ? labelSublevelComponents(sortedArcs, negate ? geometry.nVor : geometry.cells.n, t)
+        : null,
+    [geometry, sortedArcs, negate, t, verts, finite],
   )
   const geos = useMemo(() => makeIsoGeos(mesh, roots, verts), [mesh, roots, verts])
   useEffect(() => {
@@ -967,11 +983,13 @@ function VoronoiRegion2D({ results, radius }: { results: ComputeResponse; radius
   }, [geos])
 
   if (!geos) return null
+  const color = negate ? ISO_COLOR_SUP : ISO_COLOR
+  const z = negate ? REGION_Z_VOR : REGION_Z_DEL
   return (
     <>
-      <mesh geometry={geos.included} frustumCulled={false}>
+      <mesh geometry={geos.included} position={[0, 0, z]} frustumCulled={false}>
         <meshBasicMaterial
-          color={ISO_COLOR_SUP}
+          color={color}
           transparent
           opacity={opacity}
           depthWrite={false}
@@ -979,9 +997,9 @@ function VoronoiRegion2D({ results, radius }: { results: ComputeResponse; radius
         />
       </mesh>
       {geos.ghost && (
-        <mesh geometry={geos.ghost} frustumCulled={false}>
+        <mesh geometry={geos.ghost} position={[0, 0, z]} frustumCulled={false}>
           <meshBasicMaterial
-            color={ISO_COLOR_SUP}
+            color={color}
             transparent
             opacity={Math.min(0.1, opacity * 0.25)}
             depthWrite={false}
@@ -1761,8 +1779,9 @@ export default function Scene() {
           {!is2d && ui.showVorSurface && results.voronoiGeometry && (
             <PowerIsosurface results={results} radius={ui.radiusVor} negate />
           )}
+          {is2d && ui.showDelSurface && <PowerRegion2D results={results} radius={ui.radius} />}
           {is2d && ui.showVorSurface && results.voronoiGeometry && (
-            <VoronoiRegion2D results={results} radius={ui.radiusVor} />
+            <PowerRegion2D results={results} radius={ui.radiusVor} negate />
           )}
         </>
       )}
@@ -1798,9 +1817,10 @@ const FILTRATION_TOGGLES_3D = [
   { key: 'showVorSurface', label: 'Voronoi filtration (surface)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
-// 2D point sets: the exact Voronoi region (the Delaunay balls are exact already)
+// 2D point sets: the exact filtration regions
 const FILTRATION_TOGGLES_2D = [
   ...FILTRATION_TOGGLES,
+  { key: 'showDelSurface', label: 'Delaunay filtration (region)', opacityKey: 'delSurfaceOpacity' },
   { key: 'showVorSurface', label: 'Voronoi filtration (region)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
