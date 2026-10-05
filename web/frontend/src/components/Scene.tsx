@@ -9,13 +9,20 @@ import {
   buildDomainCaps,
   buildGridField,
   inverse3,
-  labelAxisComponents,
   labelSublevelComponents,
   marchingCubes,
-  resolveAnchor,
   splitTriangles,
   type IsosurfaceMesh,
 } from '../marchingCubes'
+import {
+  buildCapPieces,
+  buildPowerCells,
+  powerCaps,
+  powerSurface,
+  surfaceTranslates,
+  type CapPieces,
+  type PowerCells,
+} from '../powerSurface'
 import { useStore } from '../store'
 
 const GREEN = '#30b830'
@@ -576,6 +583,7 @@ function IsosurfaceMeshes({
   // instance matrices are pure translations, independent of the threshold;
   // refilled when the translate list or a mesh (re)mounts
   const nT = translates.length
+  const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
     const m = new THREE.Matrix4()
     for (const ref of [inclRef, ghostRef]) {
@@ -586,7 +594,9 @@ function IsosurfaceMeshes({
       }
       ref.current.instanceMatrix.needsUpdate = true
     }
-  }, [translates, nT, geos])
+    // a frame may already have been drawn with the fresh mesh's unset matrices
+    invalidate()
+  }, [translates, nT, geos, invalidate])
 
   if ((!geos && !capGeos) || nT === 0) return null
   return (
@@ -760,15 +770,55 @@ function GridIsosurface({
   )
 }
 
-// Smooth filtration isosurfaces for 3D point sets, from the sampled power
-// distance pi(x) = min_i(|x-p_i|^2 - w_i): the sublevel surface at f_Del is
-// the boundary of the Delaunay ball union; with negate, the sublevel surface
-// of -pi at f_Vor bounds the Voronoi-filtration sublevel set. Components are
-// linked to the merge trees through the anchors: the far region retracts
-// onto the sublevel Voronoi subcomplex, so a surface patch is shown iff its
-// axis-connected grid component contains the anchor of a filtered quotient
-// vertex (sites for the Delaunay channel, Voronoi vertices for the Voronoi
-// channel).
+// Per-result geometry behind the point-set filtration surfaces, shared by
+// the Delaunay and Voronoi channels: the power cells of the quotient sites,
+// the 3x-domain facets cut by them, and the lattice translates to instance
+// over. 3D point sets only.
+interface PowerGeometry {
+  cells: PowerCells
+  caps: CapPieces
+  translates: [number, number, number][]
+  nVor: number // size of the Voronoi merge tree's vertex index space
+}
+const powerGeometryCache = new WeakMap<ComputeResponse, PowerGeometry>()
+
+function powerGeometry(results: ComputeResponse): PowerGeometry {
+  let g = powerGeometryCache.get(results)
+  if (!g) {
+    const { positions3x, kept, weights } = results.points
+    // one position per quotient Voronoi vertex (any lattice copy will do)
+    const vor: number[][] = []
+    for (const a of results.voronoiGeometry?.arcs ?? []) {
+      vor[a.vStart] = a.start
+      vor[a.vEnd] = a.end
+    }
+    const cells = buildPowerCells({
+      sites: kept.map((orig) => positions3x[orig]),
+      weights: kept.map((orig) => weights[orig]),
+      arcs: results.quotientArcs,
+      basis: results.basis,
+      vorVertices: results.voronoiGeometry ? vor : null,
+    })
+    const dv = results.domain3x.vertices
+    g = {
+      cells,
+      caps: buildCapPieces(cells, results.domainA, results.domainB, dv),
+      translates: surfaceTranslates(cells, results.domainA, results.domainB, dv),
+      nVor: vor.length,
+    }
+    powerGeometryCache.set(results, g)
+  }
+  return g
+}
+
+// Filtration surfaces for 3D point sets, built exactly from the power cells
+// (see powerSurface.ts): the level set of the power distance
+// pi(x) = min_i(|x-p_i|^2 - w_i) is each site's sphere cut to its cell. At
+// f_Del it bounds the Delaunay ball union; with negate, at f_Vor it bounds
+// the Voronoi-filtration solid {pi >= -f_Vor}. Patches are linked to the
+// merge trees through their quotient vertex (the site for the Delaunay
+// channel, a Voronoi vertex of the bounded component for the Voronoi
+// channel), with components labeled on the same arcs the trees are built on.
 function PowerIsosurface({
   results,
   radius,
@@ -778,69 +828,44 @@ function PowerIsosurface({
   radius: number
   negate?: boolean
 }) {
-  const pf = results.powerField
   const is3d = results.d === 3
   const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
   const opacity = useStore((s) => (negate ? s.ui.vorSurfaceOpacity : s.ui.delSurfaceOpacity))
-  const U = useStore((s) => s.computedLattice)
-
-  const vals = useMemo(
-    () => (pf && negate ? pf.values.map((v) => -v) : (pf?.values ?? null)),
-    [pf, negate],
-  )
-  const field = useMemo(
-    () => (pf && vals && U && is3d ? buildGridField(pf.shape, vals, U) : null),
-    [pf, vals, U, is3d],
-  )
-  const translates = useMemo(
-    () => (U && is3d ? latticeTranslates3x(results, U) : []),
-    [results, U, is3d],
-  )
+  const geometry = useMemo(() => (is3d ? powerGeometry(results) : null), [results, is3d])
   const planes = useDomainClipPlanes(results, is3d)
+
+  const sortedArcs = useMemo(() => {
+    const arcs = negate ? (results.voronoiGeometry?.arcs ?? []) : results.quotientArcs
+    return [...arcs].sort((a, b) => a.filtration - b.filtration)
+  }, [results, negate])
 
   const finite = Number.isFinite(radius) // radiusVor defaults to -Infinity
   const t = radius + filtEps(radius)
+  // both channels cut the same function: f_Vor lives on the -pi scale
+  const level = negate ? -t : t
+  const filtering = verts !== null
   const mesh = useMemo(
-    () => (field && finite ? marchingCubes(field, t) : null),
-    [field, finite, t],
+    () => (geometry && finite ? powerSurface(geometry.cells, level, negate, filtering) : null),
+    [geometry, finite, level, negate, filtering],
   )
-  // labeling runs on the sampled grid's axis adjacency, only while a
-  // subtree filter is active
+  // component labeling is only needed while a subtree filter is active
   const roots = useMemo(
-    () => (field && verts && finite ? labelAxisComponents(field.shape, field.values, t) : null),
-    [field, t, verts, finite],
+    () =>
+      geometry && verts && finite
+        ? labelSublevelComponents(sortedArcs, negate ? geometry.nVor : geometry.cells.n, t)
+        : null,
+    [geometry, sortedArcs, negate, t, verts, finite],
   )
-  // filtered quotient vertices -> their grid anchors (resolved into the
-  // sublevel set); feeds splitTriangles in grid-id space like roots/triOwner
-  const filteredGridIds = useMemo(() => {
-    if (!pf || !field || !verts || !finite) return null
-    const anchors = negate ? pf.vorAnchors : pf.delAnchors
-    if (!anchors) return null
-    const out = new Set<number>()
-    for (const v of verts) {
-      const a = anchors[v]
-      if (a === undefined) continue
-      const gid = resolveAnchor(field.shape, field.values, a, t)
-      if (gid >= 0) out.add(gid)
-    }
-    return out
-  }, [pf, field, verts, negate, t, finite])
-  const geos = useMemo(
-    () => makeIsoGeos(mesh, roots, filteredGridIds),
-    [mesh, roots, filteredGridIds],
-  )
-  // caps close the solid where the 3x domain boundary cuts the sublevel set
+  const geos = useMemo(() => makeIsoGeos(mesh, roots, verts), [mesh, roots, verts])
+  // caps close the solid where the 3x domain boundary cuts it
   const capMesh = useMemo(
     () =>
-      field && U && finite
-        ? buildDomainCaps(field, U, results.domainA, results.domainB, results.domain3x.vertices, t)
+      geometry && finite
+        ? powerCaps(geometry.cells, geometry.caps, level, negate, filtering)
         : null,
-    [field, U, finite, t, results],
+    [geometry, finite, level, negate, filtering],
   )
-  const capGeos = useMemo(
-    () => makeIsoGeos(capMesh, roots, filteredGridIds),
-    [capMesh, roots, filteredGridIds],
-  )
+  const capGeos = useMemo(() => makeIsoGeos(capMesh, roots, verts), [capMesh, roots, verts])
 
   useEffect(() => {
     return () => {
@@ -851,12 +876,12 @@ function PowerIsosurface({
     }
   }, [geos, capGeos])
 
-  if (!pf || !is3d) return null
+  if (!geometry) return null
   return (
     <IsosurfaceMeshes
       geos={geos}
       capGeos={capGeos}
-      translates={translates}
+      translates={geometry.translates}
       planes={planes}
       color={negate ? ISO_COLOR_SUP : ISO_COLOR}
       opacity={opacity}
@@ -1628,10 +1653,8 @@ export default function Scene() {
           {ui.showVoronoiPoints && <VoronoiPoints results={results} />}
           {ui.showBalls && <FiltrationBalls results={results} radius={ui.radius} />}
           {ui.showVoronoiBalls && <VoronoiFiltrationCones results={results} radiusVor={ui.radiusVor} />}
-          {!is2d && ui.showDelSurface && results.powerField && (
-            <PowerIsosurface results={results} radius={ui.radius} />
-          )}
-          {!is2d && ui.showVorSurface && results.powerField?.vorAnchors && (
+          {!is2d && ui.showDelSurface && <PowerIsosurface results={results} radius={ui.radius} />}
+          {!is2d && ui.showVorSurface && results.voronoiGeometry && (
             <PowerIsosurface results={results} radius={ui.radiusVor} negate />
           )}
         </>
