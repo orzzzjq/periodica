@@ -1,5 +1,6 @@
 """Plain-assert tests for the sampled power-distance field helpers
-(sample_power_field / power_grid_shape / grid_anchor_indices).
+(sample_power_field / power_grid_shape / grid_anchor_indices) and for the
+weighted Voronoi vertices, which must sit at the peaks of that field.
 
 Run with: .venv/bin/python tests/test_power_field.py
 """
@@ -13,6 +14,7 @@ os.environ.setdefault('MPLBACKEND', 'Agg')
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from periodica import _periodica
 from periodica.core import grid_anchor_indices, power_grid_shape, sample_power_field
 
 
@@ -95,9 +97,69 @@ def test_grid_shape():
     print('PASS power_grid_shape (budget, clipping)')
 
 
+
+# ---- 5. weighted Voronoi vertices are power centers (peaks of pi) ----
+
+def brute_force_power(U, sites, w, x, reach=4):
+    """Power distances from x to every site copy within `reach` lattice steps."""
+    d = U.shape[0]
+    vals = []
+    for z in product(range(-reach, reach + 1), repeat=d):
+        c = sites + (U @ np.asarray(z, dtype=float))[:, None]
+        vals.append(((x[:, None] - c) ** 2).sum(axis=0) - w)
+    return np.concatenate(vals)
+
+
+def test_voronoi_vertex_closed_form():
+    # square lattice, corner site with weight a and an unweighted center site:
+    # the triangle (0,0),(1,0),(.5,.5) has power center (.5, a) -- its
+    # circumcenter (.5, 0) is only correct for a = 0
+    a = 0.1
+    U = np.eye(2)
+    sites = np.array([[0.0, 0.5], [0.0, 0.5]])
+    w = np.array([a, 0.0])
+    vp, _, pf, _, _ = _periodica.periodic_voronoi(U, sites, w, True)
+    got = sorted(map(tuple, np.round(vp.T % 1.0, 9)))
+    want = sorted([(0.5, a), (0.5, 1 - a), (a, 0.5), (1 - a, 0.5)])
+    assert np.allclose(got, want, atol=1e-9), (got, want)
+    assert np.allclose(pf, -(0.5 - a) ** 2, atol=1e-9), pf
+    print('PASS weighted Voronoi vertices (closed form on the square lattice)')
+
+
+def test_voronoi_vertices_at_power_peaks():
+    for d in (2, 3):
+        for weighted in (False, True):
+            for seed in range(4):
+                rng = np.random.default_rng(seed)
+                while True:
+                    U = rng.uniform(-1, 1, (d, d))
+                    if abs(np.linalg.det(U)) > 0.3:
+                        break
+                n = 6
+                sites = U @ rng.uniform(0, 1, (d, n))
+                w = rng.uniform(0, 0.05, n) if weighted else np.zeros(n)
+                vp, _, pf, _, _ = _periodica.periodic_voronoi(U, sites, w, True)
+                for k in range(vp.shape[1]):
+                    vals = brute_force_power(U, sites, w, vp[:, k])
+                    pi = vals.min()
+                    # the vertex value is the field value there (negated for
+                    # the Voronoi filtration) ...
+                    assert abs(pi + pf[k]) < 1e-6, (d, weighted, seed, k, pi, pf[k])
+                    # ... and at least d+1 sites are tied for the minimum
+                    assert (vals < pi + 1e-6).sum() >= d + 1, (d, weighted, seed, k)
+                # the 3x skeleton uses the same centers
+                full_pts, _ = _periodica.full_voronoi(U, sites, w, True)
+                for k in range(vp.shape[1]):
+                    gap = np.abs(full_pts - vp[:, [k]]).sum(axis=0).min()
+                    assert gap < 1e-9, (d, weighted, seed, k, gap)
+    print('PASS Voronoi vertices at power-field peaks (2D/3D, weighted and not)')
+
+
 if __name__ == '__main__':
     test_cubic_single_site()
     test_weighted_sites()
     test_skewed_brute_force()
     test_grid_shape()
+    test_voronoi_vertex_closed_form()
+    test_voronoi_vertices_at_power_peaks()
     print('All power-field tests passed.')

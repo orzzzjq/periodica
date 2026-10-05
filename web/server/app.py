@@ -188,7 +188,7 @@ def compute(req: ComputeRequest):
     max_radius = max((abs(f) for f in finite_filtrations), default=1.0) or 1.0
 
     # Voronoi descriptors + scene geometry from a single periodic_voronoi call
-    # (circumcenter cell centers); failures don't break the response.
+    # (vertices at the power centers); failures don't break the response.
     voronoi = None
     voronoi_error = None
     voronoi_geometry = None

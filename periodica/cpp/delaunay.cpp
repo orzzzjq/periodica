@@ -732,17 +732,25 @@ std::tuple<Eigen::MatrixXi, Eigen::VectorXd, Eigen::MatrixXi, Eigen::VectorXi> p
     return {edges, filtration, shift, kept};
 }
 
-Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {
+// Dual point of a d-simplex of the weighted Delaunay (regular) triangulation:
+// the power center x, where the power distances ||x - p_i||^2 - w_i to the
+// d+1 vertices agree. This is the vertex of the weighted Voronoi (power)
+// diagram, i.e. where the power-distance field peaks; it is the circumcenter
+// when the weights are equal.
+Eigen::VectorXd powerCenter(const vector<Eigen::VectorXd>& vertices, const vector<double>& weights) {
     if (vertices.empty()) {
         throw std::invalid_argument("vertices must be non-empty");
     }
 
     int d = static_cast<int>(vertices[0].size());
     if (d != 2 && d != 3) {
-        throw std::invalid_argument("Only 2D and 3D circumcenters are supported");
+        throw std::invalid_argument("Only 2D and 3D power centers are supported");
     }
     if (static_cast<int>(vertices.size()) != d + 1) {
         throw std::invalid_argument("A full simplex must have d+1 vertices");
+    }
+    if (weights.size() != vertices.size()) {
+        throw std::invalid_argument("weights size must be equal to the number of vertices");
     }
     for (const auto& v : vertices) {
         if (static_cast<int>(v.size()) != d) {
@@ -753,24 +761,26 @@ Eigen::VectorXd circumCenter(const vector<Eigen::VectorXd>& vertices) {
     Eigen::VectorXd result = Eigen::VectorXd::Zero(d);
     if (d == 2) {
         K2 kernel;
-        vector<Point2> pts;
+        vector<K2::Weighted_point_d> pts;
         pts.reserve(3);
-        for (const auto& v : vertices) {
-            pts.emplace_back(v(0), v(1));
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            pts.emplace_back(Point2(vertices[i](0), vertices[i](1)), weights[i]);
         }
-        Point2 center = kernel.construct_circumcenter_d_object()(pts.begin(), pts.end());
+        Point2 center = kernel.point_drop_weight_d_object()(
+            kernel.construct_power_sphere_d_object()(pts.begin(), pts.end()));
         auto coord = kernel.compute_coordinate_d_object();
         for (int j = 0; j < d; ++j) {
             result(j) = CGAL::to_double(coord(center, j));
         }
     } else {
         K3 kernel;
-        vector<Point3> pts;
+        vector<K3::Weighted_point_d> pts;
         pts.reserve(4);
-        for (const auto& v : vertices) {
-            pts.emplace_back(v(0), v(1), v(2));
+        for (size_t i = 0; i < vertices.size(); ++i) {
+            pts.emplace_back(Point3(vertices[i](0), vertices[i](1), vertices[i](2)), weights[i]);
         }
-        Point3 center = kernel.construct_circumcenter_d_object()(pts.begin(), pts.end());
+        Point3 center = kernel.point_drop_weight_d_object()(
+            kernel.construct_power_sphere_d_object()(pts.begin(), pts.end()));
         auto coord = kernel.compute_coordinate_d_object();
         for (int j = 0; j < d; ++j) {
             result(j) = CGAL::to_double(coord(center, j));
@@ -910,11 +920,14 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi, Eigen::VectorXd, Eigen::VectorXd, E
         Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
         if (useCircumCenter) {
             vector<Eigen::VectorXd> s_points;
+            vector<double> s_weights;
             s_points.reserve(s_verts.size());
+            s_weights.reserve(s_verts.size());
             for (int vi : s_verts) {
                 s_points.push_back(working_points.col(vi));
+                s_weights.push_back(working_weights(vi));
             }
-            center = circumCenter(s_points);
+            center = powerCenter(s_points, s_weights);
         } else {
             for (int vi : s_verts) {
                 center += working_points.col(vi);
@@ -1090,11 +1103,14 @@ std::tuple<Eigen::MatrixXd, Eigen::MatrixXi> fullVoronoiSkeleton(
         Eigen::VectorXd center = Eigen::VectorXd::Zero(d);
         if (useCircumCenter) {
             vector<Eigen::VectorXd> simplex_points;
+            vector<double> simplex_weights;
             simplex_points.reserve(vertices.size());
+            simplex_weights.reserve(vertices.size());
             for (int vi : vertices) {
                 simplex_points.push_back(working_points.col(vi));
+                simplex_weights.push_back(working_weights(vi));
             }
-            center = circumCenter(simplex_points);
+            center = powerCenter(simplex_points, simplex_weights);
         } else {
             for (int vi : vertices) {
                 center += working_points.col(vi);
