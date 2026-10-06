@@ -556,12 +556,27 @@ function makeIsoGeos(
   return { included, ghost }
 }
 
-// Presentational half of the isosurfaces: glossy translucent surface
-// instanced over the lattice translates covering the 3x domain and clipped
-// to it, plus the world-space caps that close the solid where the domain
-// boundary cuts it (slightly darkened, the classic cut-surface look), with
-// the ghost geometries at low opacity. Geometry DISPOSAL stays with the
-// wrapper that created it.
+// A translucent 3D family rendered with the depth pre-pass scheme (see
+// ORDER_*/BIT_* below): which stencil bits and render orders it owns, and
+// the opacity at which it shows through the other family.
+interface PrepassFamily {
+  frontBit: number
+  ghostBit: number
+  preOrder: number
+  colorOrder: number
+  ghostOrder: number
+  ghostOpacity: number
+}
+
+// Presentational half of the isosurfaces: the surface instanced over the
+// lattice translates covering the 3x domain and clipped to it, plus the
+// world-space caps that close the solid where the domain boundary cuts it
+// (slightly darkened, the classic cut-surface look). Parts dimmed by a
+// subtree filter are drawn as plain low-opacity overlays. With `prepass`
+// the family goes through the depth pre-pass passes — only its outer
+// surface is shaded, occluding and showing through the other family
+// correctly; without it, a plain glossy translucent material. Geometry
+// DISPOSAL stays with the wrapper that created it.
 function IsosurfaceMeshes({
   geos,
   capGeos,
@@ -569,6 +584,7 @@ function IsosurfaceMeshes({
   planes,
   color,
   opacity,
+  prepass,
 }: {
   geos: IsoGeos
   capGeos: IsoGeos
@@ -576,12 +592,31 @@ function IsosurfaceMeshes({
   planes: THREE.Plane[]
   color: string
   opacity: number
+  prepass?: PrepassFamily
 }) {
-  const inclRef = useRef<THREE.InstancedMesh>(null)
-  const ghostRef = useRef<THREE.InstancedMesh>(null)
+  // every instanced mesh of the surface (the passes and the dimmed part)
+  const instRefs = useRef<(THREE.InstancedMesh | null)[]>([])
   const capColor = useMemo(
     () => '#' + new THREE.Color(color).multiplyScalar(0.72).getHexString(),
     [color],
+  )
+  const bits = prepass ?? { frontBit: 0, ghostBit: 0, ghostOpacity: 0 }
+  const surfaceMats = useDepthPrepassMaterials(
+    color,
+    opacity,
+    bits.frontBit,
+    bits.ghostBit,
+    bits.ghostOpacity,
+    THREE.DoubleSide,
+    planes,
+  )
+  const capMats = useDepthPrepassMaterials(
+    capColor,
+    opacity,
+    bits.frontBit,
+    bits.ghostBit,
+    bits.ghostOpacity,
+    THREE.DoubleSide,
   )
 
   // instance matrices are pure translations, independent of the threshold;
@@ -590,78 +625,110 @@ function IsosurfaceMeshes({
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => {
     const m = new THREE.Matrix4()
-    for (const ref of [inclRef, ghostRef]) {
-      if (!ref.current) continue
+    for (const inst of instRefs.current) {
+      if (!inst) continue
       for (let i = 0; i < nT; i++) {
         m.makeTranslation(translates[i][0], translates[i][1], translates[i][2])
-        ref.current.setMatrixAt(i, m)
+        inst.setMatrixAt(i, m)
       }
-      ref.current.instanceMatrix.needsUpdate = true
+      inst.instanceMatrix.needsUpdate = true
     }
     // a frame may already have been drawn with the fresh mesh's unset matrices
     invalidate()
-  }, [translates, nT, geos, invalidate])
+  }, [translates, nT, geos, prepass, invalidate])
 
   if ((!geos && !capGeos) || nT === 0) return null
+  const dimOpacity = Math.min(0.1, opacity * 0.25)
+  const inst = (
+    k: number,
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material | undefined,
+    order: number,
+    children?: React.ReactNode,
+  ) => (
+    <instancedMesh
+      key={`iso-${k}-${nT}`}
+      ref={(m) => {
+        instRefs.current[k] = m
+      }}
+      args={[undefined, undefined, nT]}
+      geometry={geometry}
+      {...(material ? { material } : {})}
+      frustumCulled={false}
+      renderOrder={order}
+    >
+      {children}
+    </instancedMesh>
+  )
+  const showGhost = prepass !== undefined && prepass.ghostOpacity > 0.003
   return (
-    // renderOrder −1: draw before the other transparents so ghost points and
-    // edge lines composite on top of the surface
+    // without the pre-pass, renderOrder −1 draws before the other
+    // transparents so ghost points and edge lines composite on top
     <>
-      {geos && (
-        <instancedMesh
-          key={`iso-${nT}`}
-          ref={inclRef}
-          args={[undefined, undefined, nT]}
-          geometry={geos.included}
-          frustumCulled={false}
-          renderOrder={-1}
-        >
+      {geos &&
+        (prepass ? (
+          <>
+            {inst(0, geos.included, surfaceMats.depthMat, prepass.preOrder)}
+            {inst(1, geos.included, surfaceMats.colorMat, prepass.colorOrder)}
+            {showGhost && inst(2, geos.included, surfaceMats.ghostMat, prepass.ghostOrder)}
+          </>
+        ) : (
+          inst(
+            1,
+            geos.included,
+            undefined,
+            -1,
+            <meshPhongMaterial
+              color={color}
+              specular="#777777"
+              shininess={100}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={opacity}
+              depthWrite={opacity > 0.99}
+              clippingPlanes={planes}
+            />,
+          )
+        ))}
+      {geos?.ghost &&
+        inst(
+          3,
+          geos.ghost,
+          undefined,
+          -1,
           <meshPhongMaterial
             color={color}
             specular="#777777"
             shininess={100}
             side={THREE.DoubleSide}
             transparent
-            opacity={opacity}
-            depthWrite={opacity > 0.99}
-            clippingPlanes={planes}
-          />
-        </instancedMesh>
-      )}
-      {geos?.ghost && (
-        <instancedMesh
-          key={`iso-ghost-${nT}`}
-          ref={ghostRef}
-          args={[undefined, undefined, nT]}
-          geometry={geos.ghost}
-          frustumCulled={false}
-          renderOrder={-1}
-        >
-          <meshPhongMaterial
-            color={color}
-            specular="#777777"
-            shininess={100}
-            side={THREE.DoubleSide}
-            transparent
-            opacity={Math.min(0.1, opacity * 0.25)}
+            opacity={dimOpacity}
             depthWrite={false}
             clippingPlanes={planes}
-          />
-        </instancedMesh>
-      )}
-      {capGeos && (
-        <mesh geometry={capGeos.included} frustumCulled={false} renderOrder={-1}>
-          <meshPhongMaterial
-            color={capColor}
-            specular="#555555"
-            shininess={60}
-            side={THREE.DoubleSide}
-            transparent
-            opacity={opacity}
-            depthWrite={opacity > 0.99}
-          />
-        </mesh>
-      )}
+          />,
+        )}
+      {capGeos &&
+        (prepass ? (
+          <>
+            <mesh geometry={capGeos.included} material={capMats.depthMat} frustumCulled={false} renderOrder={prepass.preOrder} />
+            <mesh geometry={capGeos.included} material={capMats.colorMat} frustumCulled={false} renderOrder={prepass.colorOrder} />
+            {showGhost && (
+              <mesh geometry={capGeos.included} material={capMats.ghostMat} frustumCulled={false} renderOrder={prepass.ghostOrder} />
+            )}
+          </>
+        ) : (
+          <mesh geometry={capGeos.included} frustumCulled={false} renderOrder={-1}>
+            <meshPhongMaterial
+              color={capColor}
+              specular="#555555"
+              shininess={60}
+              side={THREE.DoubleSide}
+              transparent
+              opacity={opacity}
+              depthWrite={opacity > 0.99}
+            />
+          </mesh>
+        ))}
       {capGeos?.ghost && (
         <mesh geometry={capGeos.ghost} frustumCulled={false} renderOrder={-1}>
           <meshPhongMaterial
@@ -670,7 +737,7 @@ function IsosurfaceMeshes({
             shininess={60}
             side={THREE.DoubleSide}
             transparent
-            opacity={Math.min(0.1, opacity * 0.25)}
+            opacity={dimOpacity}
             depthWrite={false}
           />
         </mesh>
@@ -835,6 +902,37 @@ function PowerIsosurface({
   const is3d = results.d === 3
   const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
   const opacity = useStore((s) => (negate ? s.ui.vorSurfaceOpacity : s.ui.delSurfaceOpacity))
+  // the other family (its exact surface or its balls/cones), for the
+  // opacity at which this one shows through it
+  const otherOpacity = useStore((s) =>
+    negate
+      ? Math.max(s.ui.showDelSurface ? s.ui.delSurfaceOpacity : 0, s.ui.showBalls ? s.ui.ballOpacity : 0)
+      : Math.max(
+          s.ui.showVorSurface ? s.ui.vorSurfaceOpacity : 0,
+          s.ui.showVoronoiBalls ? s.ui.coneOpacity : 0,
+        ),
+  )
+  const prepass = useMemo<PrepassFamily>(
+    () =>
+      negate
+        ? {
+            frontBit: BIT_VOR_FRONT,
+            ghostBit: BIT_VOR_GHOST,
+            preOrder: ORDER_VOR_PRE,
+            colorOrder: ORDER_VOR_COLOR,
+            ghostOrder: ORDER_VOR_GHOST,
+            ghostOpacity: otherOpacity > 0 ? opacity * (1 - otherOpacity) : 0,
+          }
+        : {
+            frontBit: BIT_DEL_FRONT,
+            ghostBit: BIT_DEL_GHOST,
+            preOrder: ORDER_DEL_PRE,
+            colorOrder: ORDER_DEL_COLOR,
+            ghostOrder: ORDER_DEL_GHOST,
+            ghostOpacity: otherOpacity > 0 ? opacity * (1 - otherOpacity) : 0,
+          },
+    [negate, opacity, otherOpacity],
+  )
   const geometry = useMemo(() => (is3d ? powerGeometry(results) : null), [results, is3d])
   const planes = useDomainClipPlanes(results, is3d)
 
@@ -889,6 +987,7 @@ function PowerIsosurface({
       planes={planes}
       color={negate ? ISO_COLOR_SUP : ISO_COLOR}
       opacity={opacity}
+      prepass={prepass}
     />
   )
 }
@@ -1522,12 +1621,14 @@ function useDepthPrepassMaterials(
   frontBit: number,
   ghostBit: number,
   ghostOpacity: number,
+  side: THREE.Side = THREE.FrontSide,
+  clippingPlanes: THREE.Plane[] = [],
 ) {
   const depthMat = useMemo(() => {
-    const m = new THREE.MeshPhongMaterial({ transparent: true, depthWrite: true })
+    const m = new THREE.MeshPhongMaterial({ transparent: true, depthWrite: true, side })
     m.colorWrite = false
     return m
-  }, [])
+  }, [side])
   useEffect(() => () => depthMat.dispose(), [depthMat])
 
   // soft shading: an emissive floor keeps faces pointing away from the
@@ -1542,6 +1643,7 @@ function useDepthPrepassMaterials(
       shininess: 32,
       transparent: true,
       depthWrite: false,
+      side,
     })
 
   const colorMat = useMemo(() => {
@@ -1553,7 +1655,7 @@ function useDepthPrepassMaterials(
     m.stencilWriteMask = frontBit
     m.stencilZPass = THREE.ReplaceStencilOp
     return m
-  }, [color, frontBit])
+  }, [color, frontBit, side])
   colorMat.opacity = opacity
   useEffect(() => () => colorMat.dispose(), [colorMat])
 
@@ -1567,9 +1669,15 @@ function useDepthPrepassMaterials(
     m.stencilWriteMask = ghostBit
     m.stencilZPass = THREE.InvertStencilOp
     return m
-  }, [color, frontBit, ghostBit])
+  }, [color, frontBit, ghostBit, side])
   ghostMat.opacity = ghostOpacity
   useEffect(() => () => ghostMat.dispose(), [ghostMat])
+
+  // all passes must clip identically, or the depth contest is decided by
+  // fragments the color pass never shades
+  depthMat.clippingPlanes = clippingPlanes
+  colorMat.clippingPlanes = clippingPlanes
+  ghostMat.clippingPlanes = clippingPlanes
 
   return { depthMat, colorMat, ghostMat }
 }
