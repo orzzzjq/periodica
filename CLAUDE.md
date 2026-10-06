@@ -48,8 +48,9 @@ web/server/app.py       FastAPI backend for the web UI: POST /api/compute wraps 
                         coordinates, Dirichlet polytopes, barcodes with death=null for
                         infinite bars, persistence images). Run with `make web`.
 web/frontend/           Vite + React + TypeScript frontend: react-three-fiber scene
-                        (cell, points, quotient arcs, filtration-ball slider; 2D ortho /
-                        3D orbit) + Plotly descriptor tabs (barcode/diagram/image).
+                        (cell, points, quotient arcs, exact filtration surfaces/regions
+                        on a slider; 2D ortho / 3D orbit) + Plotly descriptor tabs
+                        (barcode/diagram/image).
                         Dev: `npm run dev` (proxies /api to :8000); `npm run build` puts
                         dist/ where the FastAPI app serves it statically.
 periodica/__init__.py   Re-exports _periodica symbols + Periodica.

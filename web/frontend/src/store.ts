@@ -37,8 +37,6 @@ interface UiState {
   showVoronoiPoints: boolean
   showVoronoiSkeleton: boolean
   showVoronoiArcs: boolean
-  showBalls: boolean
-  showVoronoiBalls: boolean
   // grid mode, 3D only: sublevel-set isosurface at the f_Sub threshold and
   // superlevel-set isosurface (of the negated field) at the f_Sup threshold
   showIsosurface: boolean
@@ -52,9 +50,7 @@ interface UiState {
   delSurfaceOpacity: number
   showVorSurface: boolean
   vorSurfaceOpacity: number
-  ballOpacity: number // Delaunay filtration balls
   filtEdgeOpacity: number // Delaunay filtration edges
-  coneOpacity: number // Voronoi filtration cones
   vorEdgeOpacity: number // Voronoi filtration edges
   sameRange: boolean
   showTreeMultiplicity: boolean // monomial labels on the merge tree
@@ -69,8 +65,9 @@ interface UiState {
   // back button; manual drag-zooms replace the current view without pushing
   treeViewStack: (TreeViewState | null)[]
   // while a subtree view is active: the quotient vertices of the clicked
-  // connected component — the matching complex's filtration overlays show
-  // only edges/cones with both endpoints (and balls with their point) in it
+  // connected component — the matching complex's filtration edges show only
+  // edges with both endpoints in it, and its surfaces/regions dim the parts
+  // of other components
   subtreeFilter: { complex: 'delaunay' | 'voronoi'; verts: number[] } | null
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
@@ -235,10 +232,6 @@ export const useStore = create<State>((set, get) => {
       showVoronoiPoints: true,
       showVoronoiSkeleton: true,
       showVoronoiArcs: true,
-      // the approximate overlays are off by default since the exact
-      // surfaces/regions replaced them
-      showBalls: false,
-      showVoronoiBalls: false,
       showIsosurface: true,
       isoOpacity: 0.6,
       showIsosurfaceSup: true,
@@ -247,9 +240,7 @@ export const useStore = create<State>((set, get) => {
       delSurfaceOpacity: 0.35,
       showVorSurface: true,
       vorSurfaceOpacity: 0.35,
-      ballOpacity: 0.35,
       filtEdgeOpacity: 1,
-      coneOpacity: 0.35,
       vorEdgeOpacity: 1,
       sameRange: true,
       showTreeMultiplicity: true,
