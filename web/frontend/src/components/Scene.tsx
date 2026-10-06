@@ -1413,22 +1413,22 @@ const DISPLAY_TOGGLES = [
   { key: 'showVoronoiArcs', label: 'periodic Voronoi edges' },
 ] as const
 
-const FILTRATION_TOGGLES = [
-  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)', opacityKey: 'filtEdgeOpacity' },
-  { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
-] as const
+// Filtration overlays are listed per filtration: the edges of one complex
+// next to its exact surface/region, then the other complex.
 
 // 3D point sets: the exact filtration surfaces
 const FILTRATION_TOGGLES_3D = [
-  ...FILTRATION_TOGGLES,
+  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)', opacityKey: 'filtEdgeOpacity' },
   { key: 'showDelSurface', label: 'Delaunay filtration (surface)', opacityKey: 'delSurfaceOpacity' },
+  { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
   { key: 'showVorSurface', label: 'Voronoi filtration (surface)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
 // 2D point sets: the exact filtration regions
 const FILTRATION_TOGGLES_2D = [
-  ...FILTRATION_TOGGLES,
+  { key: 'showFiltrationEdges', label: 'Delaunay filtration (edges)', opacityKey: 'filtEdgeOpacity' },
   { key: 'showDelSurface', label: 'Delaunay filtration (region)', opacityKey: 'delSurfaceOpacity' },
+  { key: 'showVoronoiFiltrationEdges', label: 'Voronoi filtration (edges)', opacityKey: 'vorEdgeOpacity' },
   { key: 'showVorSurface', label: 'Voronoi filtration (region)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
@@ -1448,8 +1448,9 @@ const GRID_FILTRATION_TOGGLES = [
 
 // the isosurfaces exist only in 3D grid mode
 const GRID_FILTRATION_TOGGLES_3D = [
-  ...GRID_FILTRATION_TOGGLES,
+  { key: 'showFiltrationEdges', label: 'sublevel edges', opacityKey: 'filtEdgeOpacity' },
   { key: 'showIsosurface', label: 'sublevel isosurface', opacityKey: 'isoOpacity' },
+  { key: 'showVoronoiFiltrationEdges', label: 'superlevel edges', opacityKey: 'vorEdgeOpacity' },
   { key: 'showIsosurfaceSup', label: 'superlevel isosurface', opacityKey: 'isoOpacitySup' },
 ] as const
 
