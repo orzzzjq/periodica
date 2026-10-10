@@ -12,11 +12,17 @@ topological descriptors). For more information, please check our
 
 ## Build
 
-To build Periodica from source, please install [bazelisk](https://github.com/bazelbuild/bazelisk), and simply run
-
 ```
 make
 ```
+
+This works on a fresh machine: it first runs `make setup`, which installs whatever is
+missing among uv, bazelisk and node/npm, creates the Python venv and installs the
+frontend's `node_modules`, and then builds the native extension. Missing tools are
+installed per user without root: via Homebrew when it is available, otherwise from the
+official releases into `~/.local` (set `USE_BREW=0` to force the latter,
+`TOOLS_PREFIX=...` to choose another location). You still need a C/C++ compiler
+(`xcode-select --install` on macOS, `build-essential` on Debian/Ubuntu).
 
 ## Web UI
 

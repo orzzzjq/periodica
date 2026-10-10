@@ -14,9 +14,13 @@ See `cecam_poster.pdf` for an overview.
 ## Build
 
 ```
-make            # = requirements + build
+make            # = setup + build; works on a fresh machine
+make setup      # installs what is missing: uv, bazelisk, node/npm (brew or ~/.local), venv, node_modules
 ```
 
+- `make setup` only installs what is missing; it never builds, and is a fast no-op once everything is present. `USE_BREW=0` forces the
+  no-root download path (into `TOOLS_PREFIX`, default `~/.local`), whose `bin/` the Makefile
+  prepends to `PATH` for all recipes. A C/C++ compiler is the one prerequisite it cannot install.
 - Build system is **Bazel with bzlmod** (`MODULE.bazel`); use `bazelisk` if `bazel` is absent.
 - `make` bootstraps a **uv-managed Python 3.11 venv** at `.venv` with numpy/matplotlib/scipy,
   then runs `bazel build --enable_bzlmod //:periodica_so` and copies
