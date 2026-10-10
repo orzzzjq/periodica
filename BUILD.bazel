@@ -48,7 +48,11 @@ cc_binary(
         "@pybind11//:pybind11",
         "@rules_python//python/cc:current_py_cc_headers",
     ],
-    linkopts = ["-Wl,-Bsymbolic"],
+    linkopts = select({
+        # Apple ld has no -Bsymbolic; Python symbols are resolved by the interpreter at import time.
+        "@platforms//os:macos": ["-Wl,-undefined,dynamic_lookup"],
+        "//conditions:default": ["-Wl,-Bsymbolic"],
+    }),
     linkshared = True,
 )
 
