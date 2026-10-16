@@ -1,4 +1,3 @@
-# periodica geometry input: dimension, lattice basis, points (+ optional weights)
 geometry:
 1
 dimension:
@@ -11,6 +10,6 @@ coordinates:
 fractional
 points:
 3
-0.25 0.25
-0.75 0.25
-0.50 0.75
+0.25 0.15 0.03
+0.7 0.25 0.004
+0 0.75 0
