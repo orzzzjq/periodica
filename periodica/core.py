@@ -463,12 +463,13 @@ class Periodica:
             if hasattr(self, attr):
                 delattr(self, attr)
 
-    def load_grid(self, file):
+    def load_grid(self, file, sublevel=True):
         """Load a native 'periodica grid' text file (see examples/grid_*.txt)
-        and build its quotient complex via periodic_grid."""
+        and build its quotient complex via periodic_grid (sublevel=False
+        analyzes the superlevel sets of the field)."""
         with open(file, 'r') as f:
             g = _parse_grid_text(f.read())
-        self.periodic_grid(g['U'], g['values'])
+        self.periodic_grid(g['U'], g['values'], sublevel=sublevel)
 
     def save_grid(self, file):
         """Write the current grid input (lattice + scalar field) as a grid file."""

@@ -1,34 +1,18 @@
 from periodica.core import Periodica
 import numpy as np
 
-def run_2d_quotient_example_1():
+def run_quotient_example(file):
+    """Merge tree and descriptors of a quotient-complex file."""
+    print(f'Quotient complex: {file}')
     periodica = Periodica()
-    periodica.load_quotient_complex('examples/example_2d_1.txt')
+    periodica.load_quotient_complex(file)
     periodica.print_merge_tree()
     periodica.plot_barcodes(show=False)
     periodica.plot_diagram(show=False)
     periodica.plot_images(same_range=True, show=True)
 
-def run_2d_quotient_example_2():
-    periodica = Periodica()
-    periodica.load_quotient_complex('examples/example_2d_2.txt')
-    periodica.print_merge_tree()
-    periodica.plot_barcodes(show=False)
-    periodica.plot_diagram(show=False)
-    periodica.plot_images(same_range=True, show=True)
-
-def run_3d_quotient_example():
-    periodica = Periodica()
-    periodica.load_quotient_complex('examples/example_3d_1.txt')
-    periodica.print_merge_tree()
-    periodica.plot_barcodes(show=False)
-    periodica.plot_diagram(show=False)
-    periodica.plot_images(same_range=True, show=True)
-
-def run_example(INPUT, TYPE='delaunay', show_geometry=True):
+def run_point_set(periodica, TYPE='delaunay', show_geometry=True):
     print(f'Quotient complex type: {TYPE}')
-    periodica = Periodica()
-    periodica.set_geometry(INPUT)
     periodica.quotient_complex(TYPE)
     periodica.merge_tree()
     periodica.print_merge_tree()
@@ -37,6 +21,31 @@ def run_example(INPUT, TYPE='delaunay', show_geometry=True):
         if TYPE != 'delaunay':
             periodica.plot_geometry(TYPE, show=False, slidebar=True, use_circumcenter=False)
         periodica.plot_geometry(TYPE, show=True, slidebar=True, )
+
+def run_example(INPUT, TYPE='delaunay', show_geometry=True):
+    periodica = Periodica()
+    periodica.set_geometry(INPUT)
+    run_point_set(periodica, TYPE, show_geometry)
+
+def run_geometry_example(file, TYPE='delaunay', show_geometry=True):
+    """Point set from a geometry file; TYPE is 'delaunay' or 'voronoi'."""
+    if TYPE not in ('delaunay', 'voronoi'):
+        raise ValueError(f"TYPE must be 'delaunay' or 'voronoi', not {TYPE!r}")
+    print(f'Geometry: {file}')
+    periodica = Periodica()
+    periodica.load_geometry(file)
+    run_point_set(periodica, TYPE, show_geometry)
+
+def run_grid_example(file, TYPE='sublevel'):
+    """Scalar field from a grid file; TYPE is 'sublevel' or 'superlevel'."""
+    if TYPE not in ('sublevel', 'superlevel'):
+        raise ValueError(f"TYPE must be 'sublevel' or 'superlevel', not {TYPE!r}")
+    print(f'Grid: {file} ({TYPE} sets)')
+    periodica = Periodica()
+    periodica.load_grid(file, sublevel=(TYPE == 'sublevel'))
+    periodica.merge_tree()
+    # the full tree has one beam per grid point, too long to print
+    periodica.plot_all_descriptors(show=True, same_range=False)
 
 
 EXAMPLES = {
@@ -151,10 +160,18 @@ EXAMPLES = {
 }
 
 if __name__ == "__main__":
-    # run_2d_quotient_example_1()
-    # run_2d_quotient_example_2()
-    # run_3d_quotient_example()
-    
+    # run_quotient_example('examples/2d_quotient_complex_1.txt')
+    # run_quotient_example('examples/2d_quotient_complex_2.txt')
+    # run_quotient_example('examples/3d_quotient_complex.txt')
+
+    # run_geometry_example('examples/2d_geometry.txt')
+    # run_geometry_example('examples/2d_geometry.txt', 'voronoi')
+    # run_geometry_example('examples/3d_geometry.txt')
+    # run_geometry_example('examples/3d_geometry.txt', 'voronoi')
+
+    # run_grid_example('examples/3d_electron_density.txt')
+    # run_grid_example('examples/3d_electron_density.txt', 'superlevel')
+
     # run_example(EXAMPLES['2d']['square'])
     # run_example(EXAMPLES['2d']['square'], 'voronoi')
     # run_example(EXAMPLES['2d']['hexagon'])
