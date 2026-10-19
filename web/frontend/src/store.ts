@@ -71,6 +71,8 @@ interface UiState {
   subtreeFilter: { complex: 'delaunay' | 'voronoi'; verts: number[] } | null
   imageSize: number
   complexType: 'delaunay' | 'voronoi'
+  // 2D grid inputs: the flat view, or the function drawn as a surface in 3D
+  gridView: '2d' | '3d'
 }
 
 interface State {
@@ -250,6 +252,7 @@ export const useStore = create<State>((set, get) => {
       subtreeFilter: null,
       imageSize: 100,
       complexType: 'delaunay',
+      gridView: '2d',
     },
 
     computeNow: () => {

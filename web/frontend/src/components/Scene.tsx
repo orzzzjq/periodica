@@ -307,12 +307,16 @@ const VIRIDIS: [number, number, number][] = [
   [0.993, 0.906, 0.144],
 ]
 
-function valueColor(v: number, min: number, max: number): string {
+function valueRGB(v: number, min: number, max: number): [number, number, number] {
   const t = max > min ? (v - min) / (max - min) : 0.5
   const x = Math.min(Math.max(t, 0), 1) * (VIRIDIS.length - 1)
   const i = Math.min(Math.floor(x), VIRIDIS.length - 2)
   const f = x - i
-  const c = VIRIDIS[i].map((a, k) => a + f * (VIRIDIS[i + 1][k] - a))
+  return [0, 1, 2].map((k) => VIRIDIS[i][k] + f * (VIRIDIS[i + 1][k] - VIRIDIS[i][k])) as [number, number, number]
+}
+
+function valueColor(v: number, min: number, max: number): string {
+  const c = valueRGB(v, min, max)
   return new THREE.Color(c[0], c[1], c[2]).getStyle()
 }
 
@@ -1021,6 +1025,189 @@ function GridRegion2D({
   )
 }
 
+// One mesh instanced over lattice translates (pure translations, set once
+// per mount) with the material given as children.
+function InstancedOverTranslates({
+  geometry,
+  translates,
+  renderOrder = 0,
+  children,
+}: {
+  geometry: THREE.BufferGeometry
+  translates: [number, number, number][]
+  renderOrder?: number
+  children: React.ReactNode
+}) {
+  const ref = useRef<THREE.InstancedMesh>(null)
+  const nT = translates.length
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    const inst = ref.current
+    if (!inst) return
+    const m = new THREE.Matrix4()
+    for (let i = 0; i < nT; i++) {
+      m.makeTranslation(translates[i][0], translates[i][1], translates[i][2])
+      inst.setMatrixAt(i, m)
+    }
+    inst.instanceMatrix.needsUpdate = true
+    invalidate()
+  }, [translates, nT, geometry, invalidate])
+  if (nT === 0) return null
+  return (
+    <instancedMesh key={`inst-${nT}`} ref={ref} args={[undefined, undefined, nT]} geometry={geometry} frustumCulled={false} renderOrder={renderOrder}>
+      {children}
+    </instancedMesh>
+  )
+}
+
+// The 3D view of a 2D grid input: the field as a surface z = (f − f_min)·s
+// over the 3x domain, colored by value like the grid points, with the
+// sublevel set (z below the f_Sub level, blue) and the superlevel set (z
+// above the f_Sup level, red) as the surface's parts cut by horizontal
+// clipping planes — the exact level curves, following the same switches
+// and transparency as the flat regions. One period of the surface is
+// built with periodic normals (seamless across translates), instanced over
+// the translates covering the 3x domain and clipped to it. The height
+// scale s maps the value range onto 0.4 × the unit cell's size (√|det U|).
+// The scene root turns the surface view so that z is screen-up (the camera
+// keeps its default +y up), so the clipping planes are given in that
+// rotated frame: local (x, y, z) → world (x, z, −y).
+function GridSurface3D({
+  results,
+  radius,
+  radiusVor,
+}: {
+  results: ComputeResponse
+  radius: number
+  radiusVor: number
+}) {
+  const g = results.grid
+  const U = useStore((s) => s.computedLattice)
+  const showSub = useStore((s) => s.ui.showIsosurface)
+  const showSup = useStore((s) => s.ui.showIsosurfaceSup)
+  const opSub = useStore((s) => s.ui.isoOpacity)
+  const opSup = useStore((s) => s.ui.isoOpacitySup)
+
+  const built = useMemo(() => {
+    if (!g || !U || g.shape.length !== 2) return null
+    const [N1, N2] = g.shape
+    const f = g.values
+    let fmin = Infinity
+    let fmax = -Infinity
+    for (const v of f) {
+      fmin = Math.min(fmin, v)
+      fmax = Math.max(fmax, v)
+    }
+    const det = U[0][0] * U[1][1] - U[0][1] * U[1][0]
+    const zscale = (0.4 * Math.sqrt(Math.abs(det))) / (fmax - fmin || 1)
+    // real-space gradient of z from index-space differences: U^{-T}·diag(N)
+    const gx = [(U[1][1] * N1) / det, (-U[1][0] * N2) / det]
+    const gy = [(-U[0][1] * N1) / det, (U[0][0] * N2) / det]
+    const at = (i: number, j: number) => f[(((i % N1) + N1) % N1) * N2 + (((j % N2) + N2) % N2)]
+    const nv = (N1 + 1) * (N2 + 1)
+    const pos = new Float32Array(3 * nv)
+    const nrm = new Float32Array(3 * nv)
+    const col = new Float32Array(3 * nv)
+    let k = 0
+    for (let i = 0; i <= N1; i++)
+      for (let j = 0; j <= N2; j++, k++) {
+        const v = at(i, j)
+        pos[3 * k] = (U[0][0] * i) / N1 + (U[0][1] * j) / N2
+        pos[3 * k + 1] = (U[1][0] * i) / N1 + (U[1][1] * j) / N2
+        pos[3 * k + 2] = (v - fmin) * zscale
+        const di = (at(i + 1, j) - at(i - 1, j)) / 2
+        const dj = (at(i, j + 1) - at(i, j - 1)) / 2
+        const zx = zscale * (gx[0] * di + gx[1] * dj)
+        const zy = zscale * (gy[0] * di + gy[1] * dj)
+        const l = Math.hypot(zx, zy, 1)
+        nrm[3 * k] = -zx / l
+        nrm[3 * k + 1] = -zy / l
+        nrm[3 * k + 2] = 1 / l
+        const c = valueRGB(v, fmin, fmax)
+        col[3 * k] = c[0]
+        col[3 * k + 1] = c[1]
+        col[3 * k + 2] = c[2]
+      }
+    const idx = new Uint32Array(N1 * N2 * 6)
+    let q = 0
+    for (let i = 0; i < N1; i++)
+      for (let j = 0; j < N2; j++) {
+        const a = i * (N2 + 1) + j
+        const b = a + N2 + 1
+        idx[q++] = a
+        idx[q++] = b
+        idx[q++] = a + 1
+        idx[q++] = a + 1
+        idx[q++] = b
+        idx[q++] = b + 1
+      }
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    geometry.setAttribute('normal', new THREE.BufferAttribute(nrm, 3))
+    geometry.setAttribute('color', new THREE.BufferAttribute(col, 3))
+    geometry.setIndex(new THREE.BufferAttribute(idx, 1))
+    return { geometry, fmin, zscale, translates: latticeTranslates2D(results, U) }
+  }, [g, U, results])
+  useEffect(() => () => built?.geometry.dispose(), [built])
+  // the 3x domain's edges, vertical in the rotated frame
+  const domainPlanes = useMemo(
+    () =>
+      results.domainA.map((row, i) => {
+        const n = Math.hypot(row[0], row[1])
+        return new THREE.Plane(new THREE.Vector3(-row[0] / n, 0, row[1] / n), (3 * results.domainB[i]) / n)
+      }),
+    [results],
+  )
+
+  // level heights of the two thresholds (f_Sup lives on the -f scale);
+  // height is world y in the rotated frame
+  const zSub = built && Number.isFinite(radius) ? (radius + filtEps(radius) - built.fmin) * built.zscale : null
+  const zSup =
+    built && Number.isFinite(radiusVor) ? (-(radiusVor + filtEps(radiusVor)) - built.fmin) * built.zscale : null
+  const subPlanes = useMemo(
+    () => (zSub === null ? null : [...domainPlanes, new THREE.Plane(new THREE.Vector3(0, -1, 0), zSub)]),
+    [domainPlanes, zSub],
+  )
+  const supPlanes = useMemo(
+    () => (zSup === null ? null : [...domainPlanes, new THREE.Plane(new THREE.Vector3(0, 1, 0), -zSup)]),
+    [domainPlanes, zSup],
+  )
+  if (!built) return null
+  const overlay = (color: string, opacity: number, planes: THREE.Plane[], order: number) => (
+    <InstancedOverTranslates geometry={built.geometry} translates={built.translates} renderOrder={order}>
+      <meshPhongMaterial
+        color={color}
+        emissive={new THREE.Color(color).multiplyScalar(0.3)}
+        specular="#333333"
+        shininess={20}
+        side={THREE.DoubleSide}
+        transparent
+        opacity={opacity}
+        depthWrite={false}
+        polygonOffset
+        polygonOffsetFactor={-1}
+        polygonOffsetUnits={-1}
+        clippingPlanes={planes}
+      />
+    </InstancedOverTranslates>
+  )
+  return (
+    <>
+      <InstancedOverTranslates geometry={built.geometry} translates={built.translates}>
+        <meshPhongMaterial
+          vertexColors
+          specular="#444444"
+          shininess={30}
+          side={THREE.DoubleSide}
+          clippingPlanes={domainPlanes}
+        />
+      </InstancedOverTranslates>
+      {showSub && subPlanes && overlay(ISO_COLOR, opSub, subPlanes, 1)}
+      {showSup && results.voronoi && supPlanes && overlay(ISO_COLOR_SUP, opSup, supPlanes, 2)}
+    </>
+  )
+}
+
 // Per-result geometry behind the point-set filtration surfaces, shared by
 // the Delaunay and Voronoi channels: the power cells of the quotient sites,
 // the 3x-domain facets cut by them, and the lattice translates to instance
@@ -1495,10 +1682,13 @@ export default function Scene() {
   }
 
   const is2d = results.d === 2
+  // a 2D grid can be shown flat or as a surface in 3D
+  const surfaceView = is2d && Boolean(results.grid) && ui.gridView === '3d'
+  const flat = is2d && !surfaceView
 
   return (
     <Canvas
-      key={`${results.d}`}
+      key={`${results.d}-${flat ? 'flat' : '3d'}`}
       style={{ background: '#ffffff' }}
       gl={{ stencil: true }}
       frameloop="demand"
@@ -1510,7 +1700,7 @@ export default function Scene() {
       }}
     >
       <InvalidateOnChange />
-      {is2d ? (
+      {flat ? (
         <>
           <OrthographicCamera makeDefault position={[0, 0, 10]} zoom={220 / extent} />
           <MapControls enableRotate={false} screenSpacePanning />
@@ -1527,6 +1717,8 @@ export default function Scene() {
         </>
       )}
 
+      {/* surface view: turn the plane so the function's height is screen-up */}
+      <group rotation={surfaceView ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}>
       {ui.showBasis && <BasisArrows basis={results.basis} />}
       {ui.showDomains &&
         (is2d ? (
@@ -1540,7 +1732,9 @@ export default function Scene() {
             <Domain3D polytope={results.domain3x as Polytope3D} translucent={false} />
           </>
         ))}
-      {results.grid ? (
+      {results.grid && surfaceView ? (
+        <GridSurface3D results={results} radius={ui.radius} radiusVor={ui.radiusVor} />
+      ) : results.grid ? (
         <>
           {ui.showFullSkeleton && <GridSkeleton results={results} />}
           {ui.showFiltrationEdges && <GridFiltrationEdges results={results} radius={ui.radius} />}
@@ -1579,6 +1773,7 @@ export default function Scene() {
           )}
         </>
       )}
+      </group>
     </Canvas>
   )
 }
@@ -1642,17 +1837,52 @@ const GRID_FILTRATION_TOGGLES_3D = [
   { key: 'showIsosurfaceSup', label: 'superlevel isosurface', opacityKey: 'isoOpacitySup' },
 ] as const
 
+// the surface view of a 2D grid draws only the surface with its level sets
+const GRID_DISPLAY_TOGGLES_SURFACE = [
+  { key: 'showBasis', label: 'lattice vectors' },
+  { key: 'showDomains', label: 'Dirichlet domains' },
+] as const
+
+const GRID_FILTRATION_TOGGLES_SURFACE = [
+  { key: 'showIsosurface', label: 'sublevel set', opacityKey: 'isoOpacity' },
+  { key: 'showIsosurfaceSup', label: 'superlevel set', opacityKey: 'isoOpacitySup' },
+] as const
+
+// 2D/3D switch for 2D grid inputs: the flat view or the function surface
+export function GridViewToggle() {
+  const gridView = useStore((s) => s.ui.gridView)
+  const setUi = useStore((s) => s.setUi)
+  const show = useStore((s) => Boolean(s.results?.grid) && s.results?.d === 2)
+  if (!show) return null
+  return (
+    <div className="view-toggle">
+      {(['2d', '3d'] as const).map((v) => (
+        <button key={v} className={`chip${gridView === v ? ' active' : ''}`} onClick={() => setUi({ gridView: v })}>
+          {v.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function DisplayOptions() {
   const ui = useStore((s) => s.ui)
   const setUi = useStore((s) => s.setUi)
   const isGrid = useStore((s) => Boolean(s.results?.grid))
   const is3d = useStore((s) => s.results?.d === 3)
+  const surfaceView = isGrid && !is3d && ui.gridView === '3d'
   const [open, setOpen] = useState(false)
-  const displayToggles = isGrid ? GRID_DISPLAY_TOGGLES : DISPLAY_TOGGLES
+  const displayToggles = isGrid
+    ? surfaceView
+      ? GRID_DISPLAY_TOGGLES_SURFACE
+      : GRID_DISPLAY_TOGGLES
+    : DISPLAY_TOGGLES
   const filtrationToggles = isGrid
     ? is3d
       ? GRID_FILTRATION_TOGGLES_3D
-      : GRID_FILTRATION_TOGGLES
+      : surfaceView
+        ? GRID_FILTRATION_TOGGLES_SURFACE
+        : GRID_FILTRATION_TOGGLES
     : is3d
       ? FILTRATION_TOGGLES_3D
       : FILTRATION_TOGGLES_2D

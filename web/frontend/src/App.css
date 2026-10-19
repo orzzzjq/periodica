@@ -456,6 +456,27 @@ button:disabled {
   min-width: 90px;
 }
 
+/* 2D/3D view switch of the Visualization panel, right of the display popup */
+.view-toggle {
+  display: flex;
+  gap: 0;
+  margin-left: 8px;
+}
+
+.view-toggle .chip {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
+.view-toggle .chip:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.view-toggle .chip:last-child {
+  border-radius: 0 4px 4px 0;
+  border-left: none;
+}
+
 .header-extra .row {
   margin: 0;
   font-size: 12px;

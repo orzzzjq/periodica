@@ -11,7 +11,7 @@ import {
 import PanelHost from './components/PanelSystem'
 import RadiusSlider from './components/RadiusSlider'
 import SaveButton from './components/SaveDialog'
-import Scene, { DisplayOptions } from './components/Scene'
+import Scene, { DisplayOptions, GridViewToggle } from './components/Scene'
 import { useStore } from './store'
 import './App.css'
 
@@ -55,7 +55,12 @@ const CONTENTS = {
 }
 
 const HEADER_EXTRAS = {
-  scene: <DisplayOptions />,
+  scene: (
+    <>
+      <DisplayOptions />
+      <GridViewToggle />
+    </>
+  ),
   image: <SharedRangeToggle />,
   tree: <TreeDisplayOptions />,
 }
