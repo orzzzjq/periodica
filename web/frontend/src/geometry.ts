@@ -1,6 +1,6 @@
-// The native "periodica geometry" (v1) and "periodica grid" (v1) text
-// formats. Both are sectioned: a magic header naming the format, a version
-// line, then fixed-order sections. '#' starts a comment, blank lines are
+// The native "periodica geometry" and "periodica grid" text formats. Both
+// are sectioned: a header line naming the format ("geometry" / "grid"), then
+// fixed-order sections. '#' starts a comment, blank lines are
 // ignored, tokens are separated by any whitespace. The lattice block is the
 // matrix U printed row by row — the lattice vectors are its COLUMNS
 // (matching the UI and the quotient files, NOT the POSCAR rows-are-vectors
@@ -91,13 +91,17 @@ class SectionParser {
     })
   }
 
-  magic(name: string, kind: string) {
-    if (!this.lines.length || this.lines[0].tokens[0] !== name)
-      throw new Error(`not a periodica ${kind} file (first line must be '${name}')`)
-    this.header(name)
-    const ver = this.take('format version')
-    if (ver.tokens.join(' ') !== '1')
-      this.fail(ver.no, `unsupported ${kind} format version '${ver.tokens.join(' ')}' (expected 1)`)
+  magic(name: string) {
+    const first = this.lines[0]
+    // the earlier header: "<name>:" followed by a format version line
+    if (first && first.tokens.length === 1 && first.tokens[0] === `${name}:`)
+      this.fail(
+        first.no,
+        `old ${name} file header; replace the '${name}:' line and the version line after it with '${name}'`,
+      )
+    if (!first || first.tokens.length !== 1 || first.tokens[0] !== name)
+      throw new Error(`not a periodica ${name} file (first line must be '${name}')`)
+    this.pos++
   }
 
   dimension(): 2 | 3 {
@@ -125,7 +129,7 @@ class SectionParser {
 
 export function parseGeometry(text: string): GeometryFile {
   const p = new SectionParser(text)
-  p.magic('geometry:', 'geometry')
+  p.magic('geometry')
   const d = p.dimension()
   const lattice = p.lattice(d)
 
@@ -166,7 +170,7 @@ export function parseGeometry(text: string): GeometryFile {
 
 export function parseGrid(text: string): GridFile {
   const p = new SectionParser(text)
-  p.magic('grid:', 'grid')
+  p.magic('grid')
   const d = p.dimension()
   const lattice = p.lattice(d)
 
@@ -192,7 +196,8 @@ export function parseGrid(text: string): GridFile {
 /** Dispatch a loaded input file on its magic header. */
 export function parseInputFile(text: string): ParsedInput {
   const first = tokenize(text)[0]?.tokens[0]
-  if (first === 'grid:') return { kind: 'grid', ...parseGrid(text) }
+  // 'grid:' is the old header: parseGrid explains how to update it
+  if (first === 'grid' || first === 'grid:') return { kind: 'grid', ...parseGrid(text) }
   // unknown headers fall through to the geometry error message
   return { kind: 'geometry', ...parseGeometry(text) }
 }
@@ -209,8 +214,7 @@ export function serializeGeometry(g: GeometryFile): string {
   // the weight column is written only when it carries information
   const weighted = g.weights.some((w) => w !== 0)
   const lines = [
-    'geometry:',
-    '1',
+    'geometry',
     'dimension:',
     String(g.d),
     'lattice:',
@@ -230,8 +234,7 @@ export function serializeGrid(g: { lattice: number[][]; values: GridValues }): s
   const rows: number[][] =
     shape.length === 2 ? (g.values as number[][]) : (g.values as number[][][]).flat()
   const lines = [
-    'grid:',
-    '1',
+    'grid',
     'dimension:',
     String(shape.length),
     'lattice:',

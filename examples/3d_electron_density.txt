@@ -3,8 +3,7 @@
 # density: the superlevel filtration finds the charge maxima.
 # charge in window = 0.5126 e (full grid); rho*V in [-0.03743, 1.4254] on this grid
 # downsampled x2 per axis (stride subsampling, original values kept): 96x96x56 -> 48x48x28
-grid:
-1
+grid
 dimension:
 3
 lattice:

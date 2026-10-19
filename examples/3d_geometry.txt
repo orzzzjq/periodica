@@ -1,5 +1,4 @@
-geometry:
-1
+geometry
 dimension:
 3
 lattice:

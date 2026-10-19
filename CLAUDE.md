@@ -105,15 +105,14 @@ Arcs carry **lattice shift vectors** — an arc from u to v with shift s connect
 copy of v translated by U·s. Shift-vector sign conventions are a recurring source of bugs
 (see recent commits: "negate shift vector when swapping root").
 
-## Geometry file format (`examples/geometry_*.txt`)
+## Geometry file format (`examples/*_geometry.txt`)
 
-Native input format (v1) for a lattice + points (+ optional weights). Loaded/saved by the
+Native input format for a lattice + points (+ optional weights). Loaded/saved by the
 web UI (File Load/Save in the input panel, parser in `web/frontend/src/geometry.ts`) and by
 `Periodica.load_geometry` / `save_geometry`:
 
 ```
-geometry:                 # magic header; next line is the format version
-1
+geometry                  # header line naming the format
 dimension:
 <d>                       # 2 or 3
 lattice:
@@ -128,16 +127,15 @@ points:
 `#` starts a comment, blank lines are ignored. Fractional coordinates are basis
 coefficients (real = U·p).
 
-## Grid file format (`examples/grid_*.txt`)
+## Grid file format (`examples/3d_electron_density.txt`)
 
-Native input (v1) for a periodic scalar field on a uniform fractional grid, consumed by
+Native input for a periodic scalar field on a uniform fractional grid, consumed by
 `Periodica.load_grid` / `save_grid` → `periodic_grid(U, values, sublevel=True)` (grid
 quotient complex with lower-star filtration; `sublevel=False` builds it on the negated
 field, i.e. analyzes superlevel sets; same lexical rules and lattice convention as above):
 
 ```
-grid:
-1
+grid                      # header line naming the format
 dimension:
 <d>
 lattice:

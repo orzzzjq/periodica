@@ -203,9 +203,9 @@ def test_grid_file():
             return
         raise AssertionError(f'no error for {frag!r}')
 
-    head = 'grid:\n1\ndimension:\n2\nlattice:\n1 0\n0 1\n'
-    expect_error('geometry:\n1\n', "first line must be 'grid:'")
-    expect_error('grid:\n2\n', 'unsupported grid format version')
+    head = 'grid\ndimension:\n2\nlattice:\n1 0\n0 1\n'
+    expect_error('geometry\n', "first line must be 'grid'")
+    expect_error('grid:\n1\n', "old grid file header")
     expect_error(head + 'shape:\n3\n', 'shape must be 2 positive integers')
     expect_error(head + 'shape:\n3 0\n', 'shape must be 2 positive integers')
     expect_error(head + 'shape:\n2 3\nvalues:\n1 2 3\n4 5\n', 'expected 3 numbers (3 values), got 2')

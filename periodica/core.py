@@ -70,14 +70,15 @@ class _SectionParser:
         except ValueError:
             raise ValueError(f'line {no}: not a number in {what}') from None
 
-    def magic(self, name, kind):
-        if not self.lines or self.lines[0][1][0] != name:
-            raise ValueError(f"not a periodica {kind} file (first line must be '{name}')")
-        self.header(name)
-        no, tokens = self.take('format version')
-        if tokens != ['1']:
-            raise ValueError(f"line {no}: unsupported {kind} format version "
-                             f"{' '.join(tokens)!r} (expected 1)")
+    def magic(self, name):
+        first = self.lines[0] if self.lines else None
+        if first and first[1] == [name + ':']:
+            # the earlier header: "<name>:" followed by a format version line
+            raise ValueError(f"line {first[0]}: old {name} file header; replace the "
+                             f"'{name}:' line and the version line after it with '{name}'")
+        if not first or first[1] != [name]:
+            raise ValueError(f"not a periodica {name} file (first line must be '{name}')")
+        self.pos += 1
 
     def dimension(self):
         self.header('dimension:')
@@ -103,10 +104,11 @@ class _SectionParser:
 
 
 def _parse_geometry_text(text):
-    """Parse the native 'periodica geometry' v1 text format.
+    """Parse the native 'periodica geometry' text format.
 
-    Sections in fixed order: geometry (version) / dimension / lattice /
-    coordinates (optional, fractional|real, default fractional) / points.
+    A 'geometry' header line, then sections in fixed order: dimension /
+    lattice / coordinates (optional, fractional|real, default fractional) /
+    points.
     The lattice block is the matrix U printed row by row — the lattice
     vectors are its COLUMNS. Each point row has d coordinates, optionally
     followed by a weight (uniform per file). '#' comments and blank lines
@@ -116,7 +118,7 @@ def _parse_geometry_text(text):
     mode), weights (n,), coordinates ('fractional' | 'real').
     """
     p = _SectionParser(text)
-    p.magic('geometry:', 'geometry')
+    p.magic('geometry')
     d = p.dimension()
     U = p.lattice(d)
 
@@ -152,10 +154,10 @@ def _parse_geometry_text(text):
 
 
 def _parse_grid_text(text):
-    """Parse the native 'periodica grid' v1 text format.
+    """Parse the native 'periodica grid' text format.
 
-    Sections in fixed order: grid (version) / dimension / lattice / shape /
-    values. values[i1,...,id] is the function value at the fractional grid
+    A 'grid' header line, then sections in fixed order: dimension / lattice /
+    shape / values. values[i1,...,id] is the function value at the fractional grid
     point (i1/N1, ..., id/Nd); value rows are in C order (first index
     slowest), one row of the last axis (Nd numbers) per line. '#' comments
     and blank lines are ignored.
@@ -164,7 +166,7 @@ def _parse_grid_text(text):
     values ((N1,...,Nd) array).
     """
     p = _SectionParser(text)
-    p.magic('grid:', 'grid')
+    p.magic('grid')
     d = p.dimension()
     U = p.lattice(d)
 
@@ -293,7 +295,7 @@ class Periodica:
         self.weights = np.array(weights)
 
     def load_geometry(self, file):
-        """Load a native 'periodica geometry' text file (see examples/geometry_*.txt)."""
+        """Load a native 'periodica geometry' text file (see examples/*_geometry.txt)."""
         with open(file, 'r') as f:
             g = _parse_geometry_text(f.read())
         points = g['points']
@@ -319,7 +321,7 @@ class Periodica:
         n = P.shape[1]
         weights = np.asarray(getattr(self, 'weights', np.zeros(n)), dtype=float).reshape(-1)
         weighted = np.any(weights != 0)  # the weight column is written only when used
-        lines = ['geometry:', '1', 'dimension:', str(self.d), 'lattice:',
+        lines = ['geometry', 'dimension:', str(self.d), 'lattice:',
                  '# matrix U printed row by row; the lattice vectors are its COLUMNS']
         lines += [' '.join(repr(float(v)) for v in row) for row in U]
         lines += ['coordinates:', coordinates, 'points:', str(n)]
@@ -464,7 +466,7 @@ class Periodica:
                 delattr(self, attr)
 
     def load_grid(self, file, sublevel=True):
-        """Load a native 'periodica grid' text file (see examples/grid_*.txt)
+        """Load a native 'periodica grid' text file (see examples/3d_electron_density.txt)
         and build its quotient complex via periodic_grid (sublevel=False
         analyzes the superlevel sets of the field)."""
         with open(file, 'r') as f:
@@ -477,7 +479,7 @@ class Periodica:
             raise Exception('No grid input')
         values = self.grid_values
         U = np.asarray(self.U, dtype=float)
-        lines = ['grid:', '1', 'dimension:', str(values.ndim), 'lattice:',
+        lines = ['grid', 'dimension:', str(values.ndim), 'lattice:',
                  '# matrix U printed row by row; the lattice vectors are its COLUMNS']
         lines += [' '.join(repr(float(v)) for v in row) for row in U]
         lines += ['shape:', ' '.join(str(n) for n in values.shape), 'values:']
