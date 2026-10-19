@@ -84,6 +84,8 @@ function defaultLayout(): Record<string, PanelGroup> {
   const inputW = 300
   const diagramW = 240 // 46 + 154 + 12 margins + chrome
   const imageW = 310 // 46 + 154 + 80 (colorbar margin) + chrome
+  // window widths as when Diagram and Image were separate windows: the
+  // merged window takes the image width (the diagram plots fit in it too)
   const flexible = Math.max(vw - inputW - diagramW - imageW - 6 * gap, 700)
   const sceneW = Math.max(Math.round(flexible * 0.53), 380)
   const barcodeW = Math.max(flexible - sceneW, 320)
@@ -98,10 +100,9 @@ function defaultLayout(): Record<string, PanelGroup> {
   const groups: PanelGroup[] = [
     { id: newId(), x: at(inputW), y: gap, w: inputW, h: mainH, z: 1, minimized: false, tabs: ['input'], active: 'input' },
     { id: newId(), x: at(sceneW), y: gap, w: sceneW, h: mainH, z: 2, minimized: false, tabs: ['scene'], active: 'scene' },
-    // the curve shares the barcode window as its second tab
+    // the descriptors pair up as tabs: Barcode | Curve, then Diagram | Image
     { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode', 'curve'], active: 'barcode' },
-    { id: newId(), x: at(diagramW), y: gap, w: diagramW, h: descH, z: 4, minimized: false, tabs: ['diagram'], active: 'diagram' },
-    { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 5, minimized: false, tabs: ['image'], active: 'image' },
+    { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 4, minimized: false, tabs: ['diagram', 'image'], active: 'diagram' },
     // merge tree: below Input/Visualization — the standard gap under the
     // Visualization window, right edge aligned with its right edge, left
     // edge at the middle of the Input panel
@@ -111,7 +112,7 @@ function defaultLayout(): Record<string, PanelGroup> {
       y: gap + mainH + gap,
       w: gap + inputW / 2 + sceneW,
       h: 340,
-      z: 6,
+      z: 5,
       minimized: false,
       tabs: ['tree'],
       active: 'tree',
