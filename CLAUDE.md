@@ -75,7 +75,7 @@ p.set_geometry({'d': 2, 'U': np.eye(2), 'n_points': 1, 'points': np.array([[0.5,
 p.quotient_complex('delaunay')   # or 'voronoi'
 p.merge_tree()
 p.print_merge_tree()
-p.plot_barcodes(); p.plot_diagram(); p.plot_images()
+p.plot_barcodes(); p.plot_curves(); p.plot_diagram(); p.plot_images()
 p.plot_geometry('delaunay', show=True, slidebar=True)   # interactive filtration slider
 # Alternative entry point: p.load_quotient_complex('examples/example_2d_1.txt')
 ```
@@ -85,6 +85,8 @@ list): `periodic_delaunay`, `periodic_voronoi`, `full_delaunay`, `full_voronoi`,
 `merge_tree(n, d, V, arcs, arc_filtration, arc_shift, vertex_filtration=)`,
 `barcode(d, tree)`, `image(barcode, size, min, max)`, `dirichlet_domain`,
 `canonical_points`, `points_in_3x_domain`, `reduced_basis`, `euclidean_mst`.
+The curve descriptor (total bar multiplicity alive at each filtration value, per dimension) is
+pure Python: `curves_from_barcodes` / `curve_value` in `core.py`, `Periodica.curves()`.
 
 ## Quotient-complex file format (`examples/*.txt`)
 

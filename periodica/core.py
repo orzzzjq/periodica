@@ -187,6 +187,47 @@ def _parse_grid_text(text):
     return {'d': d, 'U': U, 'values': np.array(rows).reshape(N)}
 
 
+def curves_from_barcodes(barcodes):
+    """The curve of each barcode: the total multiplicity of the bars alive at
+    a filtration value, as a right-continuous step function.
+
+    Each barcode is a list of (birth, death, multiplicity) with death = inf
+    for infinite bars. Sort-and-scan: the births add and the finite deaths
+    subtract their multiplicity, so a bar is alive on [birth, death). Returns
+    one (times, values) pair per barcode: `times` are the distinct event
+    times in increasing order, `values[i]` the curve value from times[i] up
+    to times[i+1] (0 before times[0], values[-1] after the last time).
+    Zero-length bars contribute nothing and are skipped.
+    """
+    curves = []
+    for bars in barcodes:
+        t, m = [], []
+        for birth, death, mult in bars:
+            if death == birth:
+                continue
+            t.append(birth)
+            m.append(mult)
+            if np.isfinite(death):
+                t.append(death)
+                m.append(-mult)
+        t = np.asarray(t, dtype=float)
+        m = np.asarray(m, dtype=float)
+        order = np.argsort(t, kind='stable')
+        t, m = t[order], m[order]
+        times, last = np.unique(t, return_index=True)
+        # value after each distinct time = running sum through its last event
+        ends = np.append(last[1:], len(t)) - 1
+        values = np.cumsum(m)[ends] if len(t) else np.zeros(0)
+        curves.append((times, values))
+    return curves
+
+
+def curve_value(times, values, t):
+    """Value of a curve from curves_from_barcodes at t (array-friendly)."""
+    idx = np.searchsorted(times, t, side='right') - 1
+    return np.where(idx >= 0, np.asarray(values)[np.maximum(idx, 0)] if len(values) else 0.0, 0.0)
+
+
 def _nearest_copy_shifts(B, A, b):
     """Candidate lattice shifts realizing the nearest periodic copy.
 
@@ -461,7 +502,7 @@ class Periodica:
         self.quotient_arc_filtration = np.concatenate(arc_f)
         self.quotient_arc_shift = np.hstack(shifts)
         # stale downstream results from a previous complex on this instance
-        for attr in ('tree', 'bcodes', 'persistence_images'):
+        for attr in ('tree', 'bcodes', 'filtration_curves', 'persistence_images'):
             if hasattr(self, attr):
                 delattr(self, attr)
 
@@ -568,6 +609,13 @@ class Periodica:
             self.persistence_images.append(_periodica.image(self.bcodes[i], size, xmin, xmax))
         return self.persistence_images
 
+    def curves(self):
+        """One (times, values) curve per dimension; see curves_from_barcodes."""
+        if not hasattr(self, 'bcodes'):
+            self.barcodes()
+        self.filtration_curves = curves_from_barcodes(self.bcodes)
+        return self.filtration_curves
+
     def plot_barcodes(self, show=True, ax=None):
         if not hasattr(self, 'bcodes'):
             self.barcodes()
@@ -616,6 +664,53 @@ class Periodica:
             if show:
                 plt.show()
             plt.savefig('barcode.svg')
+
+    def plot_curves(self, show=True, ax=None):
+        """Step plot of each dimension's curve, aligned with plot_barcodes."""
+        if not hasattr(self, 'filtration_curves'):
+            self.curves()
+
+        inf = np.inf
+        labels = [r'$\cdot R^0$', r'$\cdot 2 R^1$', r'$\cdot\pi R^2$', r'$\cdot \frac{4\pi}{3}R^3$']
+
+        own_figure = ax is None
+        if own_figure:
+            fig, ax = plt.subplots(self.d + 1, 1)
+            fig.set_size_inches(5, (self.d + 1) * 2)
+            plt.subplots_adjust(left=0.12, right=0.95, bottom=0.05, top=0.95, hspace=0.2)
+
+        ax = np.atleast_1d(ax)
+        if ax.shape[0] != self.d + 1:
+            raise ValueError(f'ax must contain {self.d + 1} axes')
+
+        # the barcode's x-range, so the two plots line up
+        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
+        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
+        xspan = xmax - xmin
+        xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
+
+        for i in range(self.d + 1):
+            axi = ax[self.d + 1 - i - 1]
+            times, values = self.filtration_curves[i]
+            # 0 before the first event, the last value up to the plot edge
+            x = np.concatenate(([xmin], times, [xmax]))
+            y = np.concatenate(([0.0], values, [values[-1] if len(values) else 0.0]))
+            axi.step(x, y, where='post', lw=2, color='k')
+            axi.axhline(0, lw=0.5, color='0.5')
+            lo, hi = min(0.0, y.min()), max(0.0, y.max())
+            span = (hi - lo) or 1.0
+            axi.set_xlim([xmin, xmax])
+            # headroom for the label in the top-right corner, where an
+            # infinite bar keeps the curve high
+            axi.set_ylim([lo - 0.08 * span, hi + 0.3 * span])
+            axi.text(0.98, 0.95, labels[i], transform=axi.transAxes,
+                     horizontalalignment='right', verticalalignment='top')
+
+        if own_figure:
+            plt.get_current_fig_manager().set_window_title('Curve')
+            if show:
+                plt.show()
+            plt.savefig('curve.svg')
 
     def plot_diagram(self, show=True, ax=None):
         if not hasattr(self, 'bcodes'):
@@ -730,17 +825,19 @@ class Periodica:
             plt.savefig('image.svg')
 
     def plot_all_descriptors(self, same_range=True, show=True):
-        fig, ax = plt.subplots(self.d + 1, 3, squeeze=False, gridspec_kw={'width_ratios': [2, 1, 1]})
-        fig.set_size_inches(15, (self.d + 1) * 2)
-        plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95, hspace=0.2, wspace=0.12)
+        fig, ax = plt.subplots(self.d + 1, 4, squeeze=False, gridspec_kw={'width_ratios': [2, 2, 1, 1]})
+        fig.set_size_inches(20, (self.d + 1) * 2)
+        plt.subplots_adjust(left=0.04, right=0.96, bottom=0.05, top=0.95, hspace=0.2, wspace=0.14)
 
         self.plot_barcodes(show=False, ax=ax[:, 0])
-        self.plot_diagram(show=False, ax=ax[:, 1])
-        self.plot_images(same_range=same_range, show=False, ax=ax[:, 2])
+        self.plot_curves(show=False, ax=ax[:, 1])
+        self.plot_diagram(show=False, ax=ax[:, 2])
+        self.plot_images(same_range=same_range, show=False, ax=ax[:, 3])
 
         ax[0, 0].set_title('Barcode')
-        ax[0, 1].set_title('Diagram')
-        ax[0, 2].set_title('Image')
+        ax[0, 1].set_title('Curve')
+        ax[0, 2].set_title('Diagram')
+        ax[0, 3].set_title('Image')
         plt.get_current_fig_manager().set_window_title('All descriptors')
         if show:
             plt.show()

@@ -44,6 +44,14 @@ export interface Bar {
   multiplicity: number
 }
 
+// The curve of a barcode: total multiplicity alive at t, as a right-continuous
+// step function — values[i] holds from times[i] up to times[i+1] (0 before
+// times[0], values[values.length-1] after the last time)
+export interface Curve {
+  times: number[]
+  values: number[]
+}
+
 export interface ImagesData {
   size: number
   xmin: number
@@ -59,6 +67,7 @@ export type TreeEvent = [number | null, number, number, number]
 
 export interface Descriptors {
   barcodes: Bar[][] // d+1 lists
+  curves: Curve[] // d+1 curves
   images: ImagesData
   tree: TreeEvent[][] // one time-sorted event beam per quotient vertex
 }
@@ -126,6 +135,7 @@ export interface ComputeResponse {
     arcs: { start: number[]; end: number[]; filtration: number; vStart: number; vEnd: number }[]
   } | null
   barcodes: Bar[][] // d+1 lists (Delaunay)
+  curves: Curve[] // d+1 curves (Delaunay)
   images: ImagesData // (Delaunay)
   tree: TreeEvent[][] // (Delaunay)
 }

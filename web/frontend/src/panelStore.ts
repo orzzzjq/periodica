@@ -1,14 +1,15 @@
 import { create } from 'zustand'
 import { useStore } from './store'
 
-export type PanelId = 'input' | 'scene' | 'barcode' | 'diagram' | 'image' | 'tree'
+export type PanelId = 'input' | 'scene' | 'barcode' | 'curve' | 'diagram' | 'image' | 'tree'
 
-export const PANEL_IDS: PanelId[] = ['input', 'scene', 'barcode', 'diagram', 'image', 'tree']
+export const PANEL_IDS: PanelId[] = ['input', 'scene', 'barcode', 'curve', 'diagram', 'image', 'tree']
 
 export const PANEL_TITLES: Record<PanelId, string> = {
   input: 'Input',
   scene: 'Visualization',
   barcode: 'Barcode',
+  curve: 'Curve',
   diagram: 'Diagram',
   image: 'Image',
   tree: 'Merge tree',
@@ -50,7 +51,7 @@ interface PanelState {
   resetLayout: () => void
 }
 
-const DESC_PANELS: PanelId[] = ['barcode', 'diagram', 'image']
+const DESC_PANELS: PanelId[] = ['barcode', 'curve', 'diagram', 'image']
 
 let idCounter = 0
 const newId = () => `g${Date.now().toString(36)}-${idCounter++}`
@@ -97,7 +98,8 @@ function defaultLayout(): Record<string, PanelGroup> {
   const groups: PanelGroup[] = [
     { id: newId(), x: at(inputW), y: gap, w: inputW, h: mainH, z: 1, minimized: false, tabs: ['input'], active: 'input' },
     { id: newId(), x: at(sceneW), y: gap, w: sceneW, h: mainH, z: 2, minimized: false, tabs: ['scene'], active: 'scene' },
-    { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode'], active: 'barcode' },
+    // the curve shares the barcode window as its second tab
+    { id: newId(), x: at(barcodeW), y: gap, w: barcodeW, h: descH, z: 3, minimized: false, tabs: ['barcode', 'curve'], active: 'barcode' },
     { id: newId(), x: at(diagramW), y: gap, w: diagramW, h: descH, z: 4, minimized: false, tabs: ['diagram'], active: 'diagram' },
     { id: newId(), x: at(imageW), y: gap, w: imageW, h: descH, z: 5, minimized: false, tabs: ['image'], active: 'image' },
     // merge tree: below Input/Visualization — the standard gap under the
@@ -125,6 +127,13 @@ function loadLayout(): Record<string, PanelGroup> | null {
     const parsed = JSON.parse(raw)
     if (parsed?.v !== 1 || typeof parsed.groups !== 'object') return null
     const groups = parsed.groups as Record<string, PanelGroup>
+    // layouts saved before the curve panel existed: it joins the barcode's
+    // window as the tab after it, like the default layout
+    if (!Object.values(groups).some((g) => g.tabs.includes('curve'))) {
+      const host = Object.values(groups).find((g) => g.tabs.includes('barcode'))
+      if (!host) return null
+      host.tabs.splice(host.tabs.indexOf('barcode') + 1, 0, 'curve')
+    }
     // every panel must appear exactly once
     const seen = Object.values(groups).flatMap((g) => g.tabs)
     if (seen.length !== PANEL_IDS.length || new Set(seen).size !== PANEL_IDS.length) return null

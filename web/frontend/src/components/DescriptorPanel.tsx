@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 import type { Data, Layout } from 'plotly.js'
 import createPlotlyComponent from 'react-plotly.js/factory'
-import type { Bar, Descriptors, ImagesData, TreeEvent } from '../api'
+import type { Bar, Curve, Descriptors, ImagesData, TreeEvent } from '../api'
 import { registerPlot, type SaveItem } from '../capture'
 import { useStore } from '../store'
 
@@ -243,6 +243,73 @@ function BarcodePlots({
   )
 }
 
+// The curves share the barcode's x-range and plot size, so the two tabs of
+// a window line up and the filtration cursor sits at the same place.
+function CurvePlots({
+  curves,
+  barcodes,
+  width,
+  radius,
+  cursorColor,
+}: {
+  curves: Curve[]
+  barcodes: Bar[][]
+  width: number
+  radius: number | null
+  cursorColor: string
+}) {
+  const [xmin, xmax] = xRange(barcodes, 0.12, 0.05)
+  const radiusLine: Partial<Layout>['shapes'] =
+    radius !== null
+      ? [
+          {
+            type: 'line',
+            x0: radius,
+            x1: radius,
+            y0: 0,
+            y1: 1,
+            yref: 'paper',
+            line: { color: cursorColor, width: 1, dash: 'dash' },
+          },
+        ]
+      : []
+  const dims = [...curves.keys()].reverse()
+  return (
+    <>
+      {dims.map((i, pos) => {
+        const { times, values } = curves[i]
+        const last = values.length ? values[values.length - 1] : 0
+        // 0 before the first event, the last value up to the plot edge; the
+        // 'hv' step shape holds each value until the next time
+        const x = [xmin, ...times, xmax]
+        const y = [0, ...values, last]
+        const lo = Math.min(0, ...values)
+        const hi = Math.max(0, ...values)
+        const span = hi - lo || 1
+        // headroom for the monomial label in the top-right corner, where an
+        // infinite bar keeps the curve high
+        const yrange: [number, number] = [lo - 0.08 * span, hi + 0.3 * span]
+        const traces: Data[] = [
+          {
+            x,
+            y,
+            mode: 'lines',
+            line: { shape: 'hv', color: 'black', width: 2 },
+            hoverinfo: 'text',
+            text: x.map((t, k) => `t = ${t.toFixed(3)}: ${y[k].toFixed(3)}`),
+          },
+        ]
+        const layout = baseLayout(i, xmin, xmax, width)
+        layout.yaxis = { range: yrange, zeroline: true, zerolinecolor: '#888', ...TICKS }
+        layout.shapes = [...(layout.shapes ?? []), ...radiusLine]
+        return (
+          <Plot key={i} data={traces} layout={layout} config={{ displayModeBar: false }} {...capture('curve', pos)} />
+        )
+      })}
+    </>
+  )
+}
+
 function DiagramPlots({
   barcodes,
   size,
@@ -396,7 +463,10 @@ function useDescriptors(): { desc: Descriptors | null; error: string | null } {
       error: results.voronoi ? null : (results.voronoiError ?? `${label} unavailable`),
     }
   }
-  return { desc: { barcodes: results.barcodes, images: results.images, tree: results.tree }, error: null }
+  return {
+    desc: { barcodes: results.barcodes, curves: results.curves, images: results.images, tree: results.tree },
+    error: null,
+  }
 }
 
 function DescError({ error }: { error: string | null }) {
@@ -448,6 +518,20 @@ export function BarcodePanel() {
     <div className="plots" ref={ref}>
       <DescError error={error} />
       {desc && <BarcodePlots barcodes={desc.barcodes} width={width} radius={cursor} cursorColor={cursorColor} />}
+    </div>
+  )
+}
+
+export function CurvePanel() {
+  const { desc, error } = useDescriptors()
+  const { ref, width } = usePanelWidth()
+  const { cursor, cursorColor } = useFiltrationCursor(desc)
+  return (
+    <div className="plots" ref={ref}>
+      <DescError error={error} />
+      {desc && (
+        <CurvePlots curves={desc.curves} barcodes={desc.barcodes} width={width} radius={cursor} cursorColor={cursorColor} />
+      )}
     </div>
   )
 }

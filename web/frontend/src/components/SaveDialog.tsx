@@ -4,6 +4,7 @@ import { captureItem, EXT, saveFile, zipFiles, type SaveFormat, type SaveItem } 
 const ITEMS: { key: SaveItem; label: string; suffix: string }[] = [
   { key: 'visualization', label: 'Visualization', suffix: 'visualization' },
   { key: 'barcode', label: 'Barcode', suffix: 'barcode' },
+  { key: 'curve', label: 'Curve', suffix: 'curve' },
   { key: 'diagram', label: 'Diagram', suffix: 'diagram' },
   { key: 'image', label: 'Image', suffix: 'image' },
   { key: 'tree', label: 'Merge tree', suffix: 'merge-tree' },

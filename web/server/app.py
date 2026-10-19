@@ -23,7 +23,8 @@ from pydantic import BaseModel, Field
 from scipy.spatial import ConvexHull
 
 from periodica import _periodica
-from periodica.core import Periodica, grid_anchor_indices, power_grid_shape, sample_power_field
+from periodica.core import (Periodica, curves_from_barcodes, grid_anchor_indices, power_grid_shape,
+                            sample_power_field)
 
 app = FastAPI(title='Periodica API')
 
@@ -110,6 +111,10 @@ def encode_descriptors(barcodes, images, tree, image_size):
     xspan = xmax - xmin
     return {
         'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
+        # per dimension: the total multiplicity alive at t as a right-continuous
+        # step function (times sorted, values[i] holds from times[i] on)
+        'curves': [{'times': times.tolist(), 'values': values.tolist()}
+                   for times, values in curves_from_barcodes(barcodes)],
         'images': {
             'size': image_size,
             'xmin': float(xmin - 0.12 * xspan),
@@ -282,6 +287,7 @@ def compute(req: ComputeRequest):
         'quotientArcs': arcs,
         'maxRadius': float(max_radius),
         'barcodes': delaunay_desc['barcodes'],
+        'curves': delaunay_desc['curves'],
         'images': delaunay_desc['images'],
         'tree': delaunay_desc['tree'],
     }
@@ -389,6 +395,7 @@ def compute_grid(req: GridComputeRequest):
             'arcs': arcs,
         },
         'barcodes': desc['barcodes'],
+        'curves': desc['curves'],
         'images': desc['images'],
         'tree': desc['tree'],
     }

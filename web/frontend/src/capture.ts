@@ -9,7 +9,7 @@ import Plotly from 'plotly.js-dist-min'
 import type * as THREE from 'three'
 import { useStore } from './store'
 
-export type SaveItem = 'visualization' | 'barcode' | 'diagram' | 'image' | 'tree'
+export type SaveItem = 'visualization' | 'barcode' | 'curve' | 'diagram' | 'image' | 'tree'
 export type SaveFormat = 'png' | 'jpeg'
 
 interface R3fHandles {

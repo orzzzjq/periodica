@@ -1,6 +1,7 @@
 import ControlPanel from './components/ControlPanel'
 import {
   BarcodePanel,
+  CurvePanel,
   DiagramPanel,
   ImagePanel,
   MergeTreePanel,
@@ -47,6 +48,7 @@ const CONTENTS = {
     </div>
   ),
   barcode: <BarcodePanel />,
+  curve: <CurvePanel />,
   diagram: <DiagramPanel />,
   image: <ImagePanel />,
   tree: <MergeTreePanel />,
