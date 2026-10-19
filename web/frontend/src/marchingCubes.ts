@@ -606,6 +606,107 @@ export function buildDomainCaps(
   }
 }
 
+// ---- 2D grids: filled marching squares (sublevel regions) -------------------
+
+// The sublevel region {f <= threshold} of a 2D grid field over ONE period,
+// as flat triangles in the plane z = z0 in real space (grid index (i, j)
+// sits at U · (i/N1, j/N2); the last column of cells wraps to the next
+// period, so the mesh tiles seamlessly). Each grid cell is walked
+// counterclockwise keeping the inside corners and the edge crossings
+// (linear interpolation along the edge, i.e. the bilinear interpolant's
+// zero crossings). A saddle cell — two inside corners on a diagonal — is
+// split into two separate corner pieces: those corners are not joined by
+// a grid arc, so the merge tree keeps them apart too. triOwner = the
+// quotient id (C-order ravel) of an inside corner of the piece, in the same
+// id space as the grid arcs, so the subtree split works like the 3D
+// isosurface's.
+export function marchingSquares2D(
+  shape: number[],
+  values: ArrayLike<number>,
+  U: number[][],
+  threshold: number,
+  z0: number,
+): IsosurfaceMesh {
+  const [N1, N2] = shape
+  const f = values
+  // real-space step per unit of grid index i and j
+  const ai = [U[0][0] / N1, U[1][0] / N1]
+  const aj = [U[0][1] / N2, U[1][1] / N2]
+  const positions: number[] = []
+  const owners: number[] = []
+  const pu: number[] = [] // polygon in (unwrapped) index coordinates
+  const pv: number[] = []
+  const emit = (owner: number) => {
+    for (let k = 1; k + 1 < pu.length; k++) {
+      for (const c of [0, k, k + 1]) {
+        positions.push(pu[c] * ai[0] + pv[c] * aj[0], pu[c] * ai[1] + pv[c] * aj[1], z0)
+      }
+      owners.push(owner)
+    }
+  }
+  // corner c of cell (i, j): index offsets, counterclockwise
+  const CU = [0, 1, 1, 0]
+  const CV = [0, 0, 1, 1]
+  const fc = [0, 0, 0, 0]
+  const idc = [0, 0, 0, 0]
+  for (let i = 0; i < N1; i++) {
+    const i1 = i + 1 === N1 ? 0 : i + 1
+    for (let j = 0; j < N2; j++) {
+      const j1 = j + 1 === N2 ? 0 : j + 1
+      idc[0] = i * N2 + j
+      idc[1] = i1 * N2 + j
+      idc[2] = i1 * N2 + j1
+      idc[3] = i * N2 + j1
+      let mask = 0
+      for (let c = 0; c < 4; c++) {
+        fc[c] = f[idc[c]]
+        if (fc[c] <= threshold) mask |= 1 << c
+      }
+      if (mask === 0) continue
+      // crossing on the edge from corner a to corner b (exactly one inside)
+      const cross = (a: number, b: number) => {
+        const s = (threshold - fc[a]) / (fc[b] - fc[a])
+        pu.push(i + CU[a] + s * (CU[b] - CU[a]))
+        pv.push(j + CV[a] + s * (CV[b] - CV[a]))
+      }
+      if (mask === 5 || mask === 10) {
+        // saddle: one triangle per inside corner, cut off by its two edges
+        for (let c = 0; c < 4; c++) {
+          if (!(mask & (1 << c))) continue
+          pu.length = pv.length = 0
+          pu.push(i + CU[c])
+          pv.push(j + CV[c])
+          cross(c, (c + 1) & 3)
+          cross(c, (c + 3) & 3)
+          emit(idc[c])
+        }
+        continue
+      }
+      pu.length = pv.length = 0
+      let owner = -1
+      for (let c = 0; c < 4; c++) {
+        const n = (c + 1) & 3
+        if (mask & (1 << c)) {
+          pu.push(i + CU[c])
+          pv.push(j + CV[c])
+          if (owner < 0) owner = idc[c]
+        }
+        if (((mask >> c) & 1) !== ((mask >> n) & 1)) cross(c, n)
+      }
+      emit(owner)
+    }
+  }
+  const nTri = owners.length
+  const normals = new Float32Array(nTri * 9)
+  for (let k = 2; k < normals.length; k += 3) normals[k] = 1
+  return {
+    positions: Float32Array.from(positions),
+    normals,
+    triOwner: Uint32Array.from(owners),
+    triangleCount: nTri,
+  }
+}
+
 // ---- included/ghost split (the only step rerun on a filter change) ----------
 
 // Splits the mesh triangles by whether their component (the sublevel

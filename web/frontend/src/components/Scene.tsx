@@ -11,6 +11,7 @@ import {
   inverse3,
   labelSublevelComponents,
   marchingCubes,
+  marchingSquares2D,
   splitTriangles,
   type IsosurfaceMesh,
 } from '../marchingCubes'
@@ -508,6 +509,54 @@ function latticeTranslates3x(results: ComputeResponse, U: number[][]): [number, 
   return out
 }
 
+// 2D counterpart of latticeTranslates3x: integer combos of the basis rows
+// whose translated U-parallelogram can intersect the 3x domain.
+function latticeTranslates2D(results: ComputeResponse, U: number[][]): [number, number, number][] {
+  const { basis, domainA, domainB } = results
+  const c0 = [0.5 * (U[0][0] + U[0][1]), 0.5 * (U[1][0] + U[1][1])]
+  const support = domainA.map(
+    (a) =>
+      0.5 * (Math.abs(a[0] * U[0][0] + a[1] * U[1][0]) + Math.abs(a[0] * U[0][1] + a[1] * U[1][1])),
+  )
+  const rCell = Math.hypot(Math.abs(U[0][0]) + Math.abs(U[0][1]), Math.abs(U[1][0]) + Math.abs(U[1][1]))
+  let R = 0
+  for (const v of results.domain3x.vertices) R = Math.max(R, Math.hypot(v[0], v[1]))
+  const reach = R + rCell + Math.hypot(c0[0], c0[1])
+  // T = Bᵀz (B rows = basis vectors) ⇒ |z_k| ≤ |col_k(B⁻¹)|·|T|
+  const det = basis[0][0] * basis[1][1] - basis[0][1] * basis[1][0]
+  const Binv = [
+    [basis[1][1] / det, -basis[0][1] / det],
+    [-basis[1][0] / det, basis[0][0] / det],
+  ]
+  const zMax = [0, 1].map((k) => Math.ceil(Math.hypot(Binv[0][k], Binv[1][k]) * reach))
+  const out: [number, number, number][] = []
+  for (let z1 = -zMax[0]; z1 <= zMax[0]; z1++)
+    for (let z2 = -zMax[1]; z2 <= zMax[1]; z2++) {
+      const cx = c0[0] + z1 * basis[0][0] + z2 * basis[1][0]
+      const cy = c0[1] + z1 * basis[0][1] + z2 * basis[1][1]
+      let keep = true
+      for (let i = 0; i < domainA.length && keep; i++) {
+        const a = domainA[i]
+        if (a[0] * cx + a[1] * cy > 3 * domainB[i] + support[i]) keep = false
+      }
+      if (keep) out.push([cx - c0[0], cy - c0[1], 0])
+    }
+  return out
+}
+
+// 2D counterpart of useDomainClipPlanes: the 3x domain's edges as planes
+// perpendicular to the drawing plane
+function useDomainClipPlanes2D(results: ComputeResponse): THREE.Plane[] {
+  return useMemo(
+    () =>
+      results.domainA.map((row, i) => {
+        const n = Math.hypot(row[0], row[1])
+        return new THREE.Plane(new THREE.Vector3(-row[0] / n, -row[1] / n, 0), (3 * results.domainB[i]) / n)
+      }),
+    [results],
+  )
+}
+
 // Dirichlet 3x-domain clipping planes for the isosurface materials:
 // keep A·x <= 3b ⇔ (−A_i/|A_i|)·x + 3b_i/|A_i| >= 0 (three clips distance < 0)
 function useDomainClipPlanes(results: ComputeResponse, enabled: boolean): THREE.Plane[] {
@@ -833,6 +882,137 @@ function GridIsosurface({
     <IsosurfaceMeshes
       geos={geos}
       capGeos={capGeos}
+      translates={translates}
+      planes={planes}
+      color={negate ? ISO_COLOR_SUP : ISO_COLOR}
+      opacity={opacity}
+    />
+  )
+}
+
+// Flat translucent fill of a one-period 2D mesh instanced over lattice
+// translates and clipped to the 3x domain, with the parts dimmed by a
+// subtree filter as a second, fainter instanced mesh. Geometry disposal
+// stays with the wrapper that created it.
+function FlatInstancedRegion({
+  geos,
+  translates,
+  planes,
+  color,
+  opacity,
+}: {
+  geos: IsoGeos
+  translates: [number, number, number][]
+  planes: THREE.Plane[]
+  color: string
+  opacity: number
+}) {
+  const instRefs = useRef<(THREE.InstancedMesh | null)[]>([])
+  const nT = translates.length
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => {
+    const m = new THREE.Matrix4()
+    for (const inst of instRefs.current) {
+      if (!inst) continue
+      for (let i = 0; i < nT; i++) {
+        m.makeTranslation(translates[i][0], translates[i][1], translates[i][2])
+        inst.setMatrixAt(i, m)
+      }
+      inst.instanceMatrix.needsUpdate = true
+    }
+    invalidate()
+  }, [translates, nT, geos, invalidate])
+  if (!geos || nT === 0) return null
+  const parts: [number, THREE.BufferGeometry, number][] = [[0, geos.included, opacity]]
+  if (geos.ghost) parts.push([1, geos.ghost, Math.min(0.1, opacity * 0.25)])
+  return (
+    <>
+      {parts.map(([k, geometry, alpha]) => (
+        <instancedMesh
+          key={`region-${k}-${nT}`}
+          ref={(m) => {
+            instRefs.current[k] = m
+          }}
+          args={[undefined, undefined, nT]}
+          geometry={geometry}
+          frustumCulled={false}
+        >
+          <meshBasicMaterial
+            color={color}
+            transparent
+            opacity={alpha}
+            depthWrite={false}
+            side={THREE.DoubleSide}
+            clippingPlanes={planes}
+          />
+        </instancedMesh>
+      ))}
+    </>
+  )
+}
+
+// Sublevel region of a 2D grid field at the slider threshold: filled
+// marching squares over one period of the field (linear along the grid
+// edges), instanced over the lattice translates covering the 3x domain and
+// clipped to it. With negate, the superlevel region: the sublevel region of
+// the negated field at f_Sup. Components are labeled on the grid's own arcs
+// (the merge tree's adjacency), so a subtree view dims the other
+// components. The 2D counterpart of GridIsosurface.
+function GridRegion2D({
+  results,
+  radius,
+  negate = false,
+}: {
+  results: ComputeResponse
+  radius: number
+  negate?: boolean
+}) {
+  const g = results.grid
+  const verts = useSubtreeVerts(negate ? 'voronoi' : 'delaunay')
+  const opacity = useStore((s) => (negate ? s.ui.isoOpacitySup : s.ui.isoOpacity))
+  const U = useStore((s) => s.computedLattice)
+
+  const vals = useMemo(
+    () => (g && negate ? g.values.map((v) => -v) : (g?.values ?? null)),
+    [g, negate],
+  )
+  const sortedArcs = useMemo(() => {
+    if (!g) return []
+    // negate BEFORE the lower-star max: max(-f_u, -f_v) = -min(f_u, f_v)
+    const arcs = negate
+      ? g.arcs.map((a) => ({
+          ...a,
+          filtration: Math.max(-g.values[a.vStart], -g.values[a.vEnd]),
+        }))
+      : [...g.arcs]
+    return arcs.sort((a, b) => a.filtration - b.filtration)
+  }, [g, negate])
+  const translates = useMemo(() => (U && g ? latticeTranslates2D(results, U) : []), [results, U, g])
+  const planes = useDomainClipPlanes2D(results)
+
+  const finite = Number.isFinite(radius) // radiusVor defaults to -Infinity
+  const t = radius + filtEps(radius)
+  const z = negate ? REGION_Z_VOR : REGION_Z_DEL
+  const mesh = useMemo(
+    () => (g && vals && U && finite ? marchingSquares2D(g.shape, vals, U, t, z) : null),
+    [g, vals, U, finite, t, z],
+  )
+  const roots = useMemo(
+    () => (g && verts && finite ? labelSublevelComponents(sortedArcs, g.values.length, t) : null),
+    [g, sortedArcs, t, verts, finite],
+  )
+  const geos = useMemo(() => makeIsoGeos(mesh, roots, verts), [mesh, roots, verts])
+  useEffect(() => {
+    return () => {
+      geos?.included.dispose()
+      geos?.ghost?.dispose()
+    }
+  }, [geos])
+
+  if (!g) return null
+  return (
+    <FlatInstancedRegion
+      geos={geos}
       translates={translates}
       planes={planes}
       color={negate ? ISO_COLOR_SUP : ISO_COLOR}
@@ -1374,6 +1554,10 @@ export default function Scene() {
           {!is2d && ui.showIsosurfaceSup && results.voronoi && (
             <GridIsosurface results={results} radius={ui.radiusVor} negate />
           )}
+          {is2d && ui.showIsosurface && <GridRegion2D results={results} radius={ui.radius} />}
+          {is2d && ui.showIsosurfaceSup && results.voronoi && (
+            <GridRegion2D results={results} radius={ui.radiusVor} negate />
+          )}
         </>
       ) : (
         <>
@@ -1432,8 +1616,9 @@ const FILTRATION_TOGGLES_2D = [
   { key: 'showVorSurface', label: 'Voronoi filtration (region)', opacityKey: 'vorSurfaceOpacity' },
 ] as const
 
-// grid mode renders only points/skeleton/sublevel edges (plus the shared
-// basis and domains), so the popup offers exactly those, with grid wording
+// grid mode renders points/skeleton/edges and the sublevel/superlevel sets
+// (plus the shared basis and domains), so the popup offers exactly those,
+// with grid wording
 const GRID_DISPLAY_TOGGLES = [
   { key: 'showBasis', label: 'lattice vectors' },
   { key: 'showDomains', label: 'Dirichlet domains' },
@@ -1441,12 +1626,15 @@ const GRID_DISPLAY_TOGGLES = [
   { key: 'showFullSkeleton', label: 'grid skeleton' },
 ] as const
 
+// 2D grids: the filled sublevel/superlevel regions
 const GRID_FILTRATION_TOGGLES = [
   { key: 'showFiltrationEdges', label: 'sublevel edges', opacityKey: 'filtEdgeOpacity' },
+  { key: 'showIsosurface', label: 'sublevel region', opacityKey: 'isoOpacity' },
   { key: 'showVoronoiFiltrationEdges', label: 'superlevel edges', opacityKey: 'vorEdgeOpacity' },
+  { key: 'showIsosurfaceSup', label: 'superlevel region', opacityKey: 'isoOpacitySup' },
 ] as const
 
-// the isosurfaces exist only in 3D grid mode
+// 3D grids: the isosurfaces
 const GRID_FILTRATION_TOGGLES_3D = [
   { key: 'showFiltrationEdges', label: 'sublevel edges', opacityKey: 'filtEdgeOpacity' },
   { key: 'showIsosurface', label: 'sublevel isosurface', opacityKey: 'isoOpacity' },
