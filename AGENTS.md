@@ -87,6 +87,9 @@ list): `periodic_delaunay`, `periodic_voronoi`, `full_delaunay`, `full_voronoi`,
 `canonical_points`, `points_in_3x_domain`, `reduced_basis`, `euclidean_mst`.
 The curve descriptor (total bar multiplicity alive at each filtration value, per dimension) is
 pure Python: `curves_from_barcodes` / `curve_value` in `core.py`, `Periodica.curves()`.
+`curves_to_vectors` / `Periodica.curve_vectors(interval, resolution, save_to_file)` sample the
+curves into a `(d+1) × resolution` float32 matrix for ML use (saved with `np.save`; the default
+interval is the `plot_curves` x-range, `barcode_range(bcodes)`).
 
 ## Quotient-complex file format (`examples/*.txt`)
 

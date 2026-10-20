@@ -228,6 +228,67 @@ def curve_value(times, values, t):
     return np.where(idx >= 0, np.asarray(values)[np.maximum(idx, 0)] if len(values) else 0.0, 0.0)
 
 
+def barcode_range(barcodes, pad=(0.12, 0.05)):
+    """x-range of the descriptor plots: from the smallest birth to the largest
+    finite endpoint over all non-empty barcodes (an infinite bar counts with
+    its birth), padded by the given fractions of that span below and above.
+    Zero-length bars count. Keep in sync with the inline formula of the plots
+    (plot_barcodes/plot_curves pad (0.12, 0.05), plot_diagram/plot_images/
+    images pad (0.12, 0.12)). Raises if every barcode is empty."""
+    nonempty = [b for b in barcodes if len(b)]
+    if not nonempty:
+        raise ValueError('all barcodes are empty; pass an explicit interval')
+    xmin = min(birth for b in nonempty for birth, _, _ in b)
+    xmax = max(death if death < np.inf else birth for b in nonempty for birth, death, _ in b)
+    span = xmax - xmin
+    return xmin - pad[0] * span, xmax + pad[1] * span
+
+
+def curve_range(curves, pad=(0.12, 0.05)):
+    """barcode_range computed from the curves alone: the span of their event
+    times, padded likewise. Zero-length bars have no events, so the two differ
+    only when such a bar is the extreme one. Raises if no curve has any event."""
+    times = [t for t, _ in curves if len(t)]
+    if not times:
+        raise ValueError('curves have no events; pass an explicit interval')
+    xmin = min(float(t[0]) for t in times)
+    xmax = max(float(t[-1]) for t in times)
+    span = xmax - xmin
+    return xmin - pad[0] * span, xmax + pad[1] * span
+
+
+def curves_to_vectors(curves, interval=None, resolution=100, save_to_file=None, dtype=np.float32):
+    """Sample each curve uniformly on an interval: one vector per curve.
+
+    `curves` is the list of (times, values) pairs from curves_from_barcodes /
+    Periodica.curves(). `interval` is (xmin, xmax); None uses curve_range.
+    Each curve is evaluated (curve_value) at the `resolution` points of
+    np.linspace(xmin, xmax, resolution), endpoints included. Returns a
+    (len(curves), resolution) array of `dtype` (float32 by default: compact,
+    and ample for sums of multiplicities). With save_to_file the array is
+    written by np.save (numpy appends '.npy' when the path has no extension);
+    read it back with np.load. For a dataset of several structures pass the
+    same explicit interval and resolution to every call so the vectors are
+    comparable.
+    """
+    resolution = int(resolution)
+    if resolution < 1:
+        raise ValueError('resolution must be a positive integer')
+    if interval is None:
+        xmin, xmax = curve_range(curves)
+    else:
+        xmin, xmax = float(interval[0]), float(interval[1])
+        if xmax < xmin:
+            raise ValueError('interval must satisfy xmin <= xmax')
+    x = np.linspace(xmin, xmax, resolution)
+    vectors = np.empty((len(curves), resolution), dtype=dtype)
+    for k, (times, values) in enumerate(curves):
+        vectors[k] = curve_value(times, values, x)
+    if save_to_file is not None:
+        np.save(save_to_file, vectors)
+    return vectors
+
+
 def _nearest_copy_shifts(B, A, b):
     """Candidate lattice shifts realizing the nearest periodic copy.
 
@@ -615,6 +676,16 @@ class Periodica:
             self.barcodes()
         self.filtration_curves = curves_from_barcodes(self.bcodes)
         return self.filtration_curves
+
+    def curve_vectors(self, interval=None, resolution=100, save_to_file=None):
+        """The curves sampled uniformly as a (d + 1) x resolution float32
+        matrix (row k = the R^k curve); see curves_to_vectors. The interval
+        defaults to the x-range of plot_curves."""
+        if not hasattr(self, 'filtration_curves'):
+            self.curves()
+        if interval is None:
+            interval = barcode_range(self.bcodes)  # exactly the plots' x-range
+        return curves_to_vectors(self.filtration_curves, interval, resolution, save_to_file)
 
     def plot_barcodes(self, show=True, ax=None):
         if not hasattr(self, 'bcodes'):

@@ -178,7 +178,7 @@ none exists, `barcodes()` builds the tree, `images()`/`curves()`/plots build the
 | Input | `set_geometry`, `set_weights`, `load_geometry`, `save_geometry` | `d`, `U`, `n_points`, `input_points`, `points`, `weights` |
 | Quotient complex | `quotient_complex`, `periodic_delaunay`, `periodic_voronoi`, `periodic_grid`, `load_grid`, `save_grid`, `load_quotient_complex` | `V`, `n_quotient_vertices`, `quotient_arcs`, `quotient_arc_filtration`, `quotient_arc_shift`, `quotient_vertex_filtration`, (`kept_points`, `hidden_points`), (`grid_values`, `grid_directions`) |
 | Merge tree | `merge_tree`, `print_merge_tree` | `tree` |
-| Descriptors | `barcodes`, `curves`, `images` | `bcodes`, `filtration_curves`, `persistence_images` |
+| Descriptors | `barcodes`, `curves`, `curve_vectors`, `images` | `bcodes`, `filtration_curves`, `persistence_images` |
 | Plots | `plot_barcodes`, `plot_curves`, `plot_diagram`, `plot_images`, `plot_all_descriptors`, `plot_delaunay`, `plot_voronoi`, `plot_geometry` | — |
 
 The methods `periodic_delaunay`, `periodic_voronoi`, `periodic_grid` and `merge_tree` print a
@@ -353,6 +353,26 @@ distinct event times in increasing order and `values[i]` is the total multiplici
 `[times[i], times[i+1])` (0 before `times[0]`, `values[-1]` after the last time), i.e. the
 `R^k` coefficient as a right-continuous step function. Evaluate with `curve_value`.
 
+#### `curve_vectors(interval=None, resolution=100, save_to_file=None)` → `(d+1, resolution)` array
+
+The curves as fixed-length vectors for machine learning
+(`curves_to_vectors(filtration_curves, …)`): row `k` is the `R^k` curve evaluated at the
+`resolution` points of `np.linspace(xmin, xmax, resolution)`, endpoints included.
+`interval=(xmin, xmax)` defaults to the x-range of `plot_curves`: from the smallest birth
+to the largest finite endpoint of the barcodes, padded by 12 % below and 5 % above
+(`barcode_range(bcodes)`). The module-level `curves_to_vectors` sees only the curves, so its
+own default, `curve_range(curves)`, is that span computed from the curves' event times; the
+two differ only when a zero-length bar is the extreme one. Values are `float32`.
+`save_to_file='path.npy'` writes the matrix with `np.save` (numpy appends `.npy` if the path
+has no extension); read it back with `np.load`. When building a dataset, pass the same
+explicit `interval` and `resolution` for every structure so the vectors are comparable.
+
+```python
+vec = p.curve_vectors(interval=(-0.1, 0.5), resolution=64, save_to_file='out/square.npy')
+vec.shape, vec.dtype          # ((3, 64), dtype('float32')) for d = 2
+np.load('out/square.npy')     # same matrix
+```
+
 #### `images(size=100)` → `persistence_images`
 
 One `size × size` `numpy` array per dimension. All `d + 1` images share the same square
@@ -399,6 +419,9 @@ Geometry plots (point-set inputs only):
 | --- | --- |
 | `curves_from_barcodes(barcodes)` | `[(times, values), …]`, one per barcode: running sum of signed multiplicities (bars alive on `[birth, death)`, zero-length bars skipped). |
 | `curve_value(times, values, t)` | Value of such a curve at `t` (array-friendly). |
+| `barcode_range(barcodes, pad=(0.12, 0.05))` | `(xmin, xmax)` of the descriptor plots: smallest birth to largest finite endpoint (infinite bars count with their birth), padded by the given fractions of the span. Default interval of `Periodica.curve_vectors`; raises if all barcodes are empty. |
+| `curve_range(curves, pad=(0.12, 0.05))` | The same range computed from the curves' event times (zero-length bars have none). Default interval of `curves_to_vectors`. |
+| `curves_to_vectors(curves, interval=None, resolution=100, save_to_file=None, dtype=np.float32)` | Uniform samples of each curve on `interval` as a `(len(curves), resolution)` array; optionally saved with `np.save`. |
 | `power_grid_shape(U, budget=160_000, n_min=8, n_max=96)` | Grid shape `(N1, …, Nd)` for sampling a field on the cell of `U` with roughly isotropic spacing and about `budget` samples in total (each axis clipped to `[n_min, n_max]`). |
 | `sample_power_field(U, points, weights, shape)` | Samples the periodic power distance `min_{i,z} ‖x − (p_i + U z)‖² − w_i` on the fractional grid of `U`, returned as a `shape` array (C order, same layout as `periodic_grid` values). Exact for arbitrary lattices (candidate shifts enumerated in the 3× Dirichlet domain of the reduced basis). |
 | `grid_anchor_indices(U, shape, positions)` | Ravelled (C-order) indices of the fractional grid points nearest to the real positions `(d, m)`; positions may lie outside the cell. |
