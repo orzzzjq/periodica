@@ -13,6 +13,7 @@ from pathlib import Path
 os.environ.setdefault('MPLBACKEND', 'Agg')
 
 import numpy as np
+from matplotlib import pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from periodica.core import (Periodica, barcode_range, curve_range, curve_value, curves_from_barcodes,
@@ -24,14 +25,6 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def brute_force(bars, t):
     return sum(m for b, d, m in bars if b <= t < d)
-
-
-def plot_range(bcodes, right_pad):
-    # the x-range formula of plot_curves / plot_barcodes (right_pad = 0.05)
-    xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, bcodes)))
-    xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, bcodes)))
-    span = xmax - xmin
-    return xmin - 0.12 * span, xmax + right_pad * span
 
 
 def test_hand_built():
@@ -57,12 +50,10 @@ def test_hand_built():
     x = np.linspace(lo, hi, 7)
     assert np.allclose(vec[0], [brute_force(bars0, t) for t in x])
 
-    # zero-length bars have no curve events: curve_range ignores them while
-    # barcode_range (the plots' formula) counts them
+    # zero-length bars carry no persistence: neither range counts them
     bars_z = bars0 + [(5.0, 5.0, 1.0)]
     assert curve_range(curves_from_barcodes([bars_z])) == curve_range(curves_from_barcodes([bars0]))
-    lo, hi = barcode_range([bars_z])
-    assert np.isclose(lo, 0.0 - 0.12 * 5.0) and np.isclose(hi, 5.0 + 0.05 * 5.0), (lo, hi)
+    assert barcode_range([bars_z]) == barcode_range([bars0])
     assert np.allclose(barcode_range([bars0, bars1, bars2]), curve_range(curves))
 
     # dtype and resolution edge cases
@@ -92,11 +83,12 @@ def test_errors():
     except ValueError:
         pass
     assert np.all(curves_to_vectors(empty, interval=(0.0, 1.0), resolution=5) == 0)
-    try:
-        barcode_range([[], []])
-        assert False, 'all-empty barcodes must raise'
-    except ValueError:
-        pass
+    for bc in ([[], []], [[(1.0, 1.0, 1.0)]]):
+        try:
+            barcode_range(bc)
+            assert False, 'barcodes without positive-length bars must raise'
+        except ValueError:
+            pass
     print('PASS error handling')
 
 
@@ -128,11 +120,16 @@ def test_periodica_method():
         vec = p.curve_vectors(resolution=32)
         assert hasattr(p, 'filtration_curves')
         assert vec.shape == (p.d + 1, 32) and vec.dtype == np.float32, (f, kind, vec.shape)
-        # default interval is the x-range plot_curves uses: barcode_range must
-        # stay in sync with the plots' inline formula (both paddings)
+        # default interval is the x-range the plots actually use
         lo, hi = barcode_range(p.bcodes)
-        assert np.allclose((lo, hi), plot_range(p.bcodes, 0.05)), (f, kind, (lo, hi))
-        assert np.allclose(barcode_range(p.bcodes, (0.12, 0.12)), plot_range(p.bcodes, 0.12))
+        fig, axes = plt.subplots(p.d + 1, 1)
+        p.plot_curves(show=False, ax=axes)
+        assert np.allclose(axes[0].get_xlim(), (lo, hi)), (f, kind, axes[0].get_xlim(), (lo, hi))
+        p.plot_barcodes(show=False, ax=axes)
+        assert np.allclose(axes[0].get_xlim(), (lo, hi)), (f, kind)
+        p.plot_diagram(show=False, ax=axes)
+        assert np.allclose(axes[0].get_xlim(), barcode_range(p.bcodes, (0.12, 0.12))), (f, kind)
+        plt.close(fig)
         assert np.array_equal(vec, curves_to_vectors(p.filtration_curves, (lo, hi), 32))
         # rows are the curves sampled on that interval
         x = np.linspace(lo, hi, 32)

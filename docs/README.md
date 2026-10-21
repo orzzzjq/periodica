@@ -178,7 +178,7 @@ none exists, `barcodes()` builds the tree, `images()`/`curves()`/plots build the
 | Input | `set_geometry`, `set_weights`, `load_geometry`, `save_geometry` | `d`, `U`, `n_points`, `input_points`, `points`, `weights` |
 | Quotient complex | `quotient_complex`, `periodic_delaunay`, `periodic_voronoi`, `periodic_grid`, `load_grid`, `save_grid`, `load_quotient_complex` | `V`, `n_quotient_vertices`, `quotient_arcs`, `quotient_arc_filtration`, `quotient_arc_shift`, `quotient_vertex_filtration`, (`kept_points`, `hidden_points`), (`grid_values`, `grid_directions`) |
 | Merge tree | `merge_tree`, `print_merge_tree` | `tree` |
-| Descriptors | `barcodes`, `curves`, `curve_vectors`, `images` | `bcodes`, `filtration_curves`, `persistence_images` |
+| Descriptors | `barcodes`, `curves`, `curve_vectors`, `images`, `save_barcodes`, `load_barcodes` | `bcodes`, `filtration_curves`, `persistence_images`, (`barcode_meta`) |
 | Plots | `plot_barcodes`, `plot_curves`, `plot_diagram`, `plot_images`, `plot_all_descriptors`, `plot_delaunay`, `plot_voronoi`, `plot_geometry` | — |
 
 The methods `periodic_delaunay`, `periodic_voronoi`, `periodic_grid` and `merge_tree` print a
@@ -359,10 +359,9 @@ The curves as fixed-length vectors for machine learning
 (`curves_to_vectors(filtration_curves, …)`): row `k` is the `R^k` curve evaluated at the
 `resolution` points of `np.linspace(xmin, xmax, resolution)`, endpoints included.
 `interval=(xmin, xmax)` defaults to the x-range of `plot_curves`: from the smallest birth
-to the largest finite endpoint of the barcodes, padded by 12 % below and 5 % above
-(`barcode_range(bcodes)`). The module-level `curves_to_vectors` sees only the curves, so its
-own default, `curve_range(curves)`, is that span computed from the curves' event times; the
-two differ only when a zero-length bar is the extreme one. Values are `float32`.
+to the largest finite endpoint over the bars of positive length, padded by 12 % below and
+5 % above (`barcode_range(bcodes)`; the module-level `curves_to_vectors` computes the same
+range from the curves' event times, `curve_range(curves)`). Values are `float32`.
 `save_to_file='path.npy'` writes the matrix with `np.save` (numpy appends `.npy` if the path
 has no extension); read it back with `np.load`. When building a dataset, pass the same
 explicit `interval` and `resolution` for every structure so the vectors are comparable.
@@ -376,13 +375,42 @@ np.load('out/square.npy')     # same matrix
 #### `images(size=100)` → `persistence_images`
 
 One `size × size` `numpy` array per dimension. All `d + 1` images share the same square
-range: `[xmin − 0.12·span, xmax + 0.12·span]` on both axes, where `xmin`/`xmax` are the
-smallest birth and largest finite endpoint over all non-empty barcodes (infinite deaths are
-replaced by their births for the range). Each finite bar deposits a Gaussian bump
-(GUDHI persistence-image code, discrete 11×11 Gaussian filter) at
-`(birth, death)` scaled by its **signed multiplicity**, so images can be negative. Infinite
+range `barcode_range(bcodes, (0.12, 0.12))` on both axes: the smallest birth and largest
+finite endpoint over the bars of positive length (an infinite bar counts with its birth),
+padded by 12 % of that span. Each bar of positive finite length deposits a Gaussian bump
+(GUDHI persistence-image code, discrete 11×11 Gaussian filter) at `(birth, death)` scaled
+by its **signed multiplicity**, so images can be negative. Infinite bars and zero-length
 bars are excluded. Rows index the death axis, columns the birth axis (plot with
 `origin='lower'`).
+
+#### `save_barcodes(file, meta=None, dtype=np.float64, drop_zero_length=True)` / `load_barcodes(file)`
+
+Persist the barcodes so the descriptors can be recovered later without recomputing the
+quotient complex and the merge tree. `save_barcodes` writes a compressed `.npz`
+([format below](#barcode-file)); `meta` is an optional JSON-serializable dict stored with
+it. By default bars with `death == birth` are dropped: they carry no persistence, no
+descriptor or plot range depends on them, and in grid barcodes they are the vast majority
+(one per non-critical grid point; the 3D electron-density example shrinks from 139 KB to
+1.3 KB). `dtype=np.float32` halves the bar storage at about 1e-7 relative error; float64
+round-trips exactly.
+
+`load_barcodes` sets `d`, `bcodes` and `barcode_meta` on the instance and discards any
+quotient complex, merge tree and derived descriptors, so `barcodes()` returns the loaded
+bars and `curves()`, `curve_vectors()`, `images()` and the descriptor plots give the same
+results as on the original instance. `merge_tree()`, `print_merge_tree()` and the geometry
+plots need the original input and raise. Load into a fresh instance unless you mean to
+replace the current state.
+
+```python
+p.save_barcodes('out/structure.npz', meta={'source': 'examples/3d_geometry.txt', 'complex': 'voronoi'})
+
+q = Periodica()
+q.load_barcodes('out/structure.npz')          # sets q.d, q.bcodes, q.barcode_meta
+q.curve_vectors(interval=(-1.0, 0.5), resolution=64)
+q.plot_all_descriptors(show=True)
+
+d, bcodes, meta = read_barcodes('out/structure.npz')   # without a Periodica instance
+```
 
 ### Plotting
 
@@ -419,8 +447,11 @@ Geometry plots (point-set inputs only):
 | --- | --- |
 | `curves_from_barcodes(barcodes)` | `[(times, values), …]`, one per barcode: running sum of signed multiplicities (bars alive on `[birth, death)`, zero-length bars skipped). |
 | `curve_value(times, values, t)` | Value of such a curve at `t` (array-friendly). |
-| `barcode_range(barcodes, pad=(0.12, 0.05))` | `(xmin, xmax)` of the descriptor plots: smallest birth to largest finite endpoint (infinite bars count with their birth), padded by the given fractions of the span. Default interval of `Periodica.curve_vectors`; raises if all barcodes are empty. |
-| `curve_range(curves, pad=(0.12, 0.05))` | The same range computed from the curves' event times (zero-length bars have none). Default interval of `curves_to_vectors`. |
+| `barcode_span(barcodes)` | `(lo, hi)`: smallest birth and largest finite endpoint over the bars of positive length (infinite bars count with their birth). Zero-length bars are ignored here and everywhere downstream; raises if no bar has positive length. |
+| `barcode_range(barcodes, pad=(0.12, 0.05))` | `barcode_span` padded by the given fractions of the span: the x-range of the descriptor plots (`(0.12, 0.05)` for barcode and curve, `(0.12, 0.12)` for diagram and image) and the default interval of `Periodica.curve_vectors`. |
+| `curve_range(curves, pad=(0.12, 0.05))` | The same range computed from the curves' event times. Default interval of `curves_to_vectors`. |
+| `write_barcodes(file, d, barcodes, meta=None, dtype=np.float64, drop_zero_length=True)` | Write barcodes to a compressed `.npz` ([Barcode file](#barcode-file)). |
+| `read_barcodes(file)` | `(d, barcodes, meta)` from such a file, the barcodes in the form `Periodica.barcodes()` produces; `ValueError` on a malformed file. |
 | `curves_to_vectors(curves, interval=None, resolution=100, save_to_file=None, dtype=np.float32)` | Uniform samples of each curve on `interval` as a `(len(curves), resolution)` array; optionally saved with `np.save`. |
 | `power_grid_shape(U, budget=160_000, n_min=8, n_max=96)` | Grid shape `(N1, …, Nd)` for sampling a field on the cell of `U` with roughly isotropic spacing and about `budget` samples in total (each axis clipped to `[n_min, n_max]`). |
 | `sample_power_field(U, points, weights, shape)` | Samples the periodic power distance `min_{i,z} ‖x − (p_i + U z)‖² − w_i` on the fractional grid of `U`, returned as a `shape` array (C order, same layout as `periodic_grid` values). Exact for arbitrary lattices (candidate shifts enumerated in the 3× Dirichlet domain of the reduced basis). |
@@ -556,6 +587,22 @@ arcs:
 1 0 7.0 1 1
 ```
 
+### Barcode file
+
+Compressed numpy archive (`.npz`) written by `save_barcodes` / `write_barcodes` and read by
+`load_barcodes` / `read_barcodes`, or by plain `np.load`:
+
+| key | content |
+| --- | --- |
+| `format` | the string `periodica-barcodes-1` |
+| `d` | lattice dimension, 2 or 3 |
+| `dims` | `(n,)` uint8, the dimension `k` (power of *R*) of each bar |
+| `bars` | `(n, 3)` float64 (or float32) rows `birth, death, multiplicity`; infinite deaths are stored as `inf` |
+| `meta` | JSON string, `{}` unless `meta=` was given |
+
+Bars are concatenated over dimensions in increasing `k`, so empty dimensions are
+representable. Zero-length bars are omitted unless `drop_zero_length=False`.
+
 ---
 
 ## Gotchas
@@ -565,7 +612,7 @@ arcs:
 - **Stale results on reuse.** `barcodes()`, `images()`, `curves()` and the plots only compute
   what is missing. After calling `set_geometry`/`set_weights`/`quotient_complex` again on the
   same instance, call `merge_tree()` (and `barcodes()` …) explicitly, or use a fresh
-  `Periodica()`. Only `periodic_grid` clears downstream results itself.
+  `Periodica()`. Only `periodic_grid` and `load_barcodes` clear downstream results themselves.
 - **Hidden points shift indices.** With weights, `quotient_arcs` index the kept points; map
   back with `kept_points[idx]`.
 - **Degenerate inputs** rely on the built-in perturbation (`PERTURBATION = 1e-9`); if you
@@ -574,6 +621,9 @@ arcs:
 - **Voronoi filtration values are negative** (negated alpha values). Individual barcodes can
   be empty (e.g. dimension 0 of some Voronoi complexes); the descriptor plots and `images()`
   skip empty ones when computing their ranges, and raise if *every* barcode is empty.
+- **Zero-length bars** (`death == birth`) are ignored by every descriptor and by the plot
+  ranges, and `save_barcodes` drops them by default. They still sit in `bcodes` and appear as
+  diagonal points of `plot_diagram` until a barcode file is reloaded.
 - **Plots write SVGs** (`barcode.svg`, `curve.svg`, `diagram.svg`, `image.svg`,
   `all_descriptors.svg`) into the current working directory whenever they own the figure.
 - **Mixed stdout.** `print_merge_tree` and the `[WARNING]`/`[TIME]` lines come from different

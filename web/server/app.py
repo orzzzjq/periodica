@@ -23,8 +23,8 @@ from pydantic import BaseModel, Field
 from scipy.spatial import ConvexHull
 
 from periodica import _periodica
-from periodica.core import (Periodica, curves_from_barcodes, grid_anchor_indices, power_grid_shape,
-                            sample_power_field)
+from periodica.core import (Periodica, barcode_range, curves_from_barcodes, grid_anchor_indices,
+                            power_grid_shape, sample_power_field)
 
 app = FastAPI(title='Periodica API')
 
@@ -104,11 +104,9 @@ def encode_tree(tree):
 
 
 def encode_descriptors(barcodes, images, tree, image_size):
-    # x-range of the persistence images, matching Periodica.images();
-    # a dimension can have no bars at all (e.g. dim 0 of a Voronoi complex)
-    xmin = min(min(bar[0] for bar in bars) for bars in barcodes if bars)
-    xmax = max(max(bar[1] if np.isfinite(bar[1]) else bar[0] for bar in bars) for bars in barcodes if bars)
-    xspan = xmax - xmin
+    # x-range of the persistence images, the same call Periodica.images()
+    # makes (zero-length bars are ignored)
+    xmin, xmax = barcode_range(barcodes, (0.12, 0.12))
     return {
         'barcodes': [[encode_bar(bar) for bar in bars] for bars in barcodes],
         # per dimension: the total multiplicity alive at t as a right-continuous
@@ -117,8 +115,8 @@ def encode_descriptors(barcodes, images, tree, image_size):
                    for times, values in curves_from_barcodes(barcodes)],
         'images': {
             'size': image_size,
-            'xmin': float(xmin - 0.12 * xspan),
-            'xmax': float(xmax + 0.12 * xspan),
+            'xmin': float(xmin),
+            'xmax': float(xmax),
             'data': [np.asarray(img).tolist() for img in images],
         },
         'tree': encode_tree(tree),

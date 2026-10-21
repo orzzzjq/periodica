@@ -4,6 +4,7 @@ try:
     from . import _periodica
 except ImportError:
     import _periodica
+import json
 import numpy as np
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -228,26 +229,34 @@ def curve_value(times, values, t):
     return np.where(idx >= 0, np.asarray(values)[np.maximum(idx, 0)] if len(values) else 0.0, 0.0)
 
 
+def barcode_span(barcodes):
+    """(lo, hi) over the bars of positive length of all barcodes: the smallest
+    birth and the largest finite endpoint (an infinite bar counts with its
+    birth). Zero-length bars carry no persistence; they are ignored here, by
+    the descriptors and by the plot ranges, so dropping them (see
+    write_barcodes) changes nothing downstream. Raises if there is no bar of
+    positive length."""
+    births = [b for bars in barcodes for b, d, _ in bars if d != b]
+    if not births:
+        raise ValueError('barcodes have no bars of positive length')
+    ends = [d if d < np.inf else b for bars in barcodes for b, d, _ in bars if d != b]
+    return min(births), max(ends)
+
+
 def barcode_range(barcodes, pad=(0.12, 0.05)):
-    """x-range of the descriptor plots: from the smallest birth to the largest
-    finite endpoint over all non-empty barcodes (an infinite bar counts with
-    its birth), padded by the given fractions of that span below and above.
-    Zero-length bars count. Keep in sync with the inline formula of the plots
-    (plot_barcodes/plot_curves pad (0.12, 0.05), plot_diagram/plot_images/
-    images pad (0.12, 0.12)). Raises if every barcode is empty."""
-    nonempty = [b for b in barcodes if len(b)]
-    if not nonempty:
-        raise ValueError('all barcodes are empty; pass an explicit interval')
-    xmin = min(birth for b in nonempty for birth, _, _ in b)
-    xmax = max(death if death < np.inf else birth for b in nonempty for birth, death, _ in b)
-    span = xmax - xmin
-    return xmin - pad[0] * span, xmax + pad[1] * span
+    """barcode_span padded by the given fractions of the span below and
+    above: the x-range of plot_barcodes / plot_curves (pad (0.12, 0.05)) and
+    of plot_diagram / plot_images / images (pad (0.12, 0.12)), and the
+    default interval of Periodica.curve_vectors."""
+    lo, hi = barcode_span(barcodes)
+    span = hi - lo
+    return lo - pad[0] * span, hi + pad[1] * span
 
 
 def curve_range(curves, pad=(0.12, 0.05)):
-    """barcode_range computed from the curves alone: the span of their event
-    times, padded likewise. Zero-length bars have no events, so the two differ
-    only when such a bar is the extreme one. Raises if no curve has any event."""
+    """barcode_range computed from the curves alone (identical: the curves'
+    event times are exactly the endpoints of the bars of positive length).
+    Raises if no curve has any event."""
     times = [t for t, _ in curves if len(t)]
     if not times:
         raise ValueError('curves have no events; pass an explicit interval')
@@ -287,6 +296,81 @@ def curves_to_vectors(curves, interval=None, resolution=100, save_to_file=None, 
     if save_to_file is not None:
         np.save(save_to_file, vectors)
     return vectors
+
+
+BARCODE_FILE_FORMAT = 'periodica-barcodes-1'
+
+
+def write_barcodes(file, d, barcodes, meta=None, dtype=np.float64, drop_zero_length=True):
+    """Write barcodes to a compressed .npz file (numpy appends '.npz' when the
+    path has no extension).
+
+    `barcodes` are the d + 1 lists of (birth, death, multiplicity) from
+    Periodica.barcodes(); `meta` is an optional JSON-serializable dict stored
+    alongside. Keys of the archive: 'format' (BARCODE_FILE_FORMAT), 'd',
+    'dims' (uint8, the dimension of each bar), 'bars' (n x 3 array of birth,
+    death, multiplicity in `dtype`, infinite deaths kept as inf) and 'meta'
+    (JSON string). With drop_zero_length (default) bars with death == birth
+    are left out: they carry no persistence and no descriptor or plot range
+    depends on them, while in grid barcodes they are the vast majority (one
+    per non-critical grid point). float64 round-trips exactly; float32 halves
+    the bar storage at ~1e-7 relative error.
+    """
+    d = int(d)
+    if d not in (2, 3):
+        raise ValueError('d must be 2 or 3')
+    if len(barcodes) != d + 1:
+        raise ValueError(f'expected {d + 1} barcodes, got {len(barcodes)}')
+    dims, rows = [], []
+    for k, bars in enumerate(barcodes):
+        for birth, death, mult in bars:
+            if drop_zero_length and death == birth:
+                continue
+            dims.append(k)
+            rows.append((birth, death, mult))
+    np.savez_compressed(
+        file,
+        format=np.array(BARCODE_FILE_FORMAT),
+        d=np.array(d, dtype=np.int8),
+        dims=np.array(dims, dtype=np.uint8),
+        bars=np.array(rows, dtype=np.float64).reshape(-1, 3).astype(dtype),
+        meta=np.array(json.dumps({} if meta is None else dict(meta))),
+    )
+
+
+def read_barcodes(file):
+    """Read a file written by write_barcodes: returns (d, barcodes, meta) with
+    the barcodes as d + 1 lists of (birth, death, multiplicity) float tuples,
+    exactly the form Periodica.barcodes() produces. Validates the archive and
+    raises ValueError on anything that is not a well-formed barcode file."""
+    z = np.load(file, allow_pickle=False)
+    if not isinstance(z, np.lib.npyio.NpzFile):
+        raise ValueError(f'{file}: not a periodica barcode file (not an .npz archive)')
+    with z:
+        missing = {'format', 'd', 'dims', 'bars'} - set(z.files)
+        if missing:
+            raise ValueError(f'{file}: not a periodica barcode file (missing {sorted(missing)})')
+        fmt = str(z['format'])
+        if fmt != BARCODE_FILE_FORMAT:
+            raise ValueError(f'{file}: unsupported barcode file format {fmt!r}')
+        d = int(z['d'])
+        dims = np.asarray(z['dims'])
+        bars = np.asarray(z['bars'], dtype=np.float64)
+        meta = json.loads(str(z['meta'])) if 'meta' in z.files else {}
+    if d not in (2, 3):
+        raise ValueError(f'{file}: dimension must be 2 or 3, got {d}')
+    if bars.ndim != 2 or bars.shape[1] != 3 or dims.shape != (bars.shape[0],):
+        raise ValueError(f'{file}: bars must be an (n, 3) array with one dimension per bar')
+    if dims.size and (dims.min() < 0 or dims.max() > d):
+        raise ValueError(f'{file}: bar dimensions must lie in 0..{d}')
+    if np.isnan(bars).any() or not np.isfinite(bars[:, 0]).all() or not np.isfinite(bars[:, 2]).all():
+        raise ValueError(f'{file}: births and multiplicities must be finite')
+    if (bars[:, 1] < bars[:, 0]).any():
+        raise ValueError(f'{file}: a bar dies before its birth')
+    barcodes = [[] for _ in range(d + 1)]
+    for k, bar in zip(dims.tolist(), bars.tolist()):
+        barcodes[k].append(tuple(bar))
+    return d, barcodes, meta
 
 
 def _nearest_copy_shifts(B, A, b):
@@ -649,6 +733,8 @@ class Periodica:
 
     def barcodes(self):
         if not hasattr(self, 'tree'):
+            if hasattr(self, 'bcodes') and not hasattr(self, 'quotient_arcs'):
+                return self.bcodes  # from load_barcodes: nothing to recompute them from
             self.merge_tree()
         self.bcodes = _periodica.barcode(self.d, self.tree)
         return self.bcodes
@@ -657,17 +743,15 @@ class Periodica:
         if not hasattr(self, 'bcodes'):
             self.barcodes()
 
-        inf = np.inf
-        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
-        # where every component is born with monomial exponent >= 1)
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
-        xspan = xmax - xmin
-        xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
-        
+        # one range for all dimensions; zero-length bars carry no persistence
+        # and are left out of the range and of the images (web/server/app.py
+        # reports the same range through barcode_range)
+        xmin, xmax = barcode_range(self.bcodes, (0.12, 0.12))
+
         self.persistence_images = []
         for i in range(self.d + 1):
-            self.persistence_images.append(_periodica.image(self.bcodes[i], size, xmin, xmax))
+            bars = [b for b in self.bcodes[i] if b[1] != b[0]]
+            self.persistence_images.append(_periodica.image(bars, size, xmin, xmax))
         return self.persistence_images
 
     def curves(self):
@@ -687,6 +771,28 @@ class Periodica:
             interval = barcode_range(self.bcodes)  # exactly the plots' x-range
         return curves_to_vectors(self.filtration_curves, interval, resolution, save_to_file)
 
+    def save_barcodes(self, file, meta=None, dtype=np.float64, drop_zero_length=True):
+        """Write the barcodes to a compressed .npz file (see write_barcodes), so
+        the descriptors can later be recovered with load_barcodes without the
+        geometry, the quotient complex or the merge tree."""
+        if not hasattr(self, 'bcodes'):
+            self.barcodes()
+        write_barcodes(file, self.d, self.bcodes, meta, dtype, drop_zero_length)
+
+    def load_barcodes(self, file):
+        """Load barcodes written by save_barcodes into this instance: sets d,
+        bcodes and barcode_meta, and discards any quotient complex, merge tree
+        and derived descriptors so that barcodes() returns the loaded bars.
+        curves / curve_vectors / images and the descriptor plots then work;
+        merge_tree, print_merge_tree and the geometry plots need the input."""
+        self.d, self.bcodes, self.barcode_meta = read_barcodes(file)
+        for attr in ('tree', 'quotient_arcs', 'quotient_arc_filtration', 'quotient_arc_shift',
+                     'quotient_vertex_filtration', 'n_quotient_vertices',
+                     'filtration_curves', 'persistence_images'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        return self.bcodes
+
     def plot_barcodes(self, show=True, ax=None):
         if not hasattr(self, 'bcodes'):
             self.barcodes()
@@ -705,10 +811,7 @@ class Periodica:
         if ax.shape[0] != self.d + 1:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
-        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
-        # where every component is born with monomial exponent >= 1)
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
+        xmin, xmax = barcode_span(self.bcodes)  # zero-length bars ignored
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
         # print(f'xmin {xmin} xmax {xmax}')
@@ -755,8 +858,7 @@ class Periodica:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
         # the barcode's x-range, so the two plots line up
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
+        xmin, xmax = barcode_span(self.bcodes)
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.05 * xspan
 
@@ -800,10 +902,7 @@ class Periodica:
         if ax.shape[0] != self.d + 1:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
-        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
-        # where every component is born with monomial exponent >= 1)
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
+        xmin, xmax = barcode_span(self.bcodes)  # zero-length bars ignored
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
         xticks = np.linspace(xmin, xmax, 5)[:-1]
@@ -849,10 +948,7 @@ class Periodica:
         if ax.shape[0] != self.d + 1:
             raise ValueError(f'ax must contain {self.d + 1} axes')
 
-        # skip dimensions with no bars (e.g. dim 0 of a Voronoi complex,
-        # where every component is born with monomial exponent >= 1)
-        xmin = min(map(lambda b: min(map(lambda x: x[0], b)), filter(len, self.bcodes)))
-        xmax = max(map(lambda b: max(map(lambda x: x[1] if x[1] < inf else x[0], b)), filter(len, self.bcodes)))
+        xmin, xmax = barcode_span(self.bcodes)  # zero-length bars ignored
         xspan = xmax - xmin
         xmin, xmax = xmin - 0.12 * xspan, xmax + 0.12 * xspan
         # print(f'xmin {xmin} xmax {xmax}')

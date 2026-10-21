@@ -90,6 +90,10 @@ pure Python: `curves_from_barcodes` / `curve_value` in `core.py`, `Periodica.cur
 `curves_to_vectors` / `Periodica.curve_vectors(interval, resolution, save_to_file)` sample the
 curves into a `(d+1) × resolution` float32 matrix for ML use (saved with `np.save`; the default
 interval is the `plot_curves` x-range, `barcode_range(bcodes)`).
+`Periodica.save_barcodes(file, meta=None, dtype=np.float64, drop_zero_length=True)` / `load_barcodes(file)`
+(`write_barcodes` / `read_barcodes` at module level) persist barcodes as a compressed `.npz` (keys
+`format`, `d`, `dims`, `bars`, `meta`); a loaded instance recovers every descriptor without geometry or
+merge tree. Zero-length bars are ignored by all descriptors and plot ranges and dropped on save.
 
 ## Quotient-complex file format (`examples/*.txt`)
 
