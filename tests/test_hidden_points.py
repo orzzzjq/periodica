@@ -146,7 +146,7 @@ def test_plot_delaunay_arc_positions():
 def test_quotient_file_regression():
     # The file-based pipeline bypasses periodic_delaunay and must be unaffected.
     p = Periodica()
-    p.load_quotient_complex(os.path.join(REPO_ROOT, 'examples', 'example_2d_1.txt'))
+    p.load_quotient_complex(os.path.join(REPO_ROOT, 'examples', '2d_quotient_complex_1.txt'))
     p.merge_tree()
     assert count_infinite_bars(p) == 1, 'file-based quotient complex regressed'
     print('PASS file-based quotient complex regression')
