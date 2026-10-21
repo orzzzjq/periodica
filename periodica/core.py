@@ -518,7 +518,15 @@ class Periodica:
             f.write('\n'.join(lines) + '\n')
 
     @timing
+    def _forget_grid(self):
+        """Drop the grid state so merge_tree() uses the explicit arcs of the
+        complex that replaces it."""
+        for attr in ('grid_field', 'grid_shape', 'grid_directions', 'grid_values'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+
     def periodic_delaunay(self):
+        self._forget_grid()
         if not hasattr(self, 'points'):
             raise Exception('No input points')
         weights = getattr(self, 'weights', np.zeros(self.points.shape[1], dtype=float))
@@ -543,6 +551,7 @@ class Periodica:
 
     @timing
     def periodic_voronoi(self):
+        self._forget_grid()
         if not hasattr(self, 'points'):
             raise Exception('No input points')
         weights = getattr(self, 'weights', np.zeros(self.points.shape[1], dtype=float))
@@ -572,7 +581,7 @@ class Periodica:
         # print(f'arc shift:\n{self.quotient_arc_shift}')
 
     @timing
-    def periodic_grid(self, U, values, sublevel=True):
+    def periodic_grid(self, U, values, sublevel=True, build_arcs=True):
         """Quotient complex of a uniform periodic grid with a scalar field.
 
         values[i1,...,id] is the function value at the fractional grid point
@@ -588,6 +597,13 @@ class Periodica:
         (vertex filtration -f, arc filtration max(-f_u, -f_v)), so the
         merge tree analyzes superlevel sets of f. grid_values keeps the
         raw input either way (save_grid round-trips the original field).
+
+        merge_tree() on a grid complex uses the native grid_merge_tree, which
+        generates the arcs on the fly from the field and the directions. The
+        explicit arc arrays (quotient_arcs, quotient_arc_filtration,
+        quotient_arc_shift) are only needed by the plots, the web UI and
+        tests; build_arcs=False skips them (3 arcs per grid point) for
+        large grids.
         """
         values = np.asarray(values, dtype=float)
         d = values.ndim
@@ -622,19 +638,8 @@ class Periodica:
             'grid directions do not form a lattice basis'
         self.grid_directions = D
 
-        # arcs: one per grid point and direction; wrapping indices fold back
-        # modulo N and contribute the lattice shift (floor quotient)
-        idx = np.indices(values.shape).reshape(d, -1)
-        src = np.ravel_multi_index(idx, values.shape)
         # negate BEFORE the lower-star max: max(-f_u, -f_v) = -min(f_u, f_v)
         f = (values if sublevel else -values).ravel()
-        arcs, shifts, arc_f = [], [], []
-        for k in range(d):
-            tgt = idx + D[:, k][:, None]
-            shifts.append(tgt // N[:, None])
-            tgt_id = np.ravel_multi_index(tgt % N[:, None], values.shape)
-            arcs.append(np.column_stack([src, tgt_id]))
-            arc_f.append(np.maximum(f[src], f[tgt_id]))
 
         self.d = d
         self.U = U
@@ -643,13 +648,30 @@ class Periodica:
         self.V = U
         self.n_quotient_vertices = int(N.prod())
         self.quotient_vertex_filtration = f
+        self.grid_shape = tuple(int(x) for x in N)
+        self.grid_field = f  # consumed by grid_merge_tree in merge_tree()
+        # stale downstream results from a previous complex on this instance
+        for attr in ('tree', 'bcodes', 'filtration_curves', 'persistence_images',
+                     'quotient_arcs', 'quotient_arc_filtration', 'quotient_arc_shift'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        if not build_arcs:
+            return
+
+        # arcs: one per grid point and direction; wrapping indices fold back
+        # modulo N and contribute the lattice shift (floor quotient)
+        idx = np.indices(values.shape).reshape(d, -1)
+        src = np.ravel_multi_index(idx, values.shape)
+        arcs, shifts, arc_f = [], [], []
+        for k in range(d):
+            tgt = idx + D[:, k][:, None]
+            shifts.append(tgt // N[:, None])
+            tgt_id = np.ravel_multi_index(tgt % N[:, None], values.shape)
+            arcs.append(np.column_stack([src, tgt_id]))
+            arc_f.append(np.maximum(f[src], f[tgt_id]))
         self.quotient_arcs = np.vstack(arcs)
         self.quotient_arc_filtration = np.concatenate(arc_f)
         self.quotient_arc_shift = np.hstack(shifts)
-        # stale downstream results from a previous complex on this instance
-        for attr in ('tree', 'bcodes', 'filtration_curves', 'persistence_images'):
-            if hasattr(self, attr):
-                delattr(self, attr)
 
     def load_grid(self, file, sublevel=True):
         """Load a native 'periodica grid' text file (see examples/3d_electron_density.txt)
@@ -678,6 +700,7 @@ class Periodica:
         pass
 
     def load_quotient_complex(self, file):
+        self._forget_grid()
         with open(file, 'r') as f:
             # dimension
             f.readline()
@@ -718,6 +741,13 @@ class Periodica:
 
     @timing
     def merge_tree(self):
+        if hasattr(self, 'grid_field'):
+            # grid complex: the arcs are generated on the fly in C++ from the
+            # field and the grid directions (same union-find event sequence
+            # as the explicit arcs; see tests/test_grid_barcode.py)
+            self.tree = _periodica.grid_merge_tree(self.d, self.U, list(self.grid_shape),
+                                                   self.grid_field, self.grid_directions)
+            return self.tree
         if not hasattr(self, 'quotient_arcs'):
             self.quotient_complex()
         if hasattr(self, 'quotient_vertex_filtration'):
@@ -731,12 +761,17 @@ class Periodica:
             self.merge_tree()
         _periodica.print_merge_tree(self.tree)
 
-    def barcodes(self):
+    def barcodes(self, drop_zero_length=False):
+        """The signed barcodes, d + 1 lists of (birth, death, multiplicity).
+        Zero-length bars (death == birth, one per non-critical vertex of a
+        grid) carry no persistence and are ignored by every descriptor and
+        plot; drop_zero_length=True leaves them out, which for large grids
+        saves most of the barcode time and memory."""
         if not hasattr(self, 'tree'):
-            if hasattr(self, 'bcodes') and not hasattr(self, 'quotient_arcs'):
+            if hasattr(self, 'bcodes') and not hasattr(self, 'quotient_arcs') and not hasattr(self, 'grid_field'):
                 return self.bcodes  # from load_barcodes: nothing to recompute them from
             self.merge_tree()
-        self.bcodes = _periodica.barcode(self.d, self.tree)
+        self.bcodes = _periodica.barcode(self.d, self.tree, drop_zero_length)
         return self.bcodes
     
     def images(self, size=100):
@@ -787,7 +822,7 @@ class Periodica:
         merge_tree, print_merge_tree and the geometry plots need the input."""
         self.d, self.bcodes, self.barcode_meta = read_barcodes(file)
         for attr in ('tree', 'quotient_arcs', 'quotient_arc_filtration', 'quotient_arc_shift',
-                     'quotient_vertex_filtration', 'n_quotient_vertices',
+                     'quotient_vertex_filtration', 'n_quotient_vertices', 'grid_field', 'grid_shape',
                      'filtration_curves', 'persistence_images'):
             if hasattr(self, attr):
                 delattr(self, attr)

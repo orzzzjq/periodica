@@ -6,9 +6,11 @@ Run with:   .venv/bin/python tests/test_grid_barcode.py
 
 1. Golden barcodes: every case in CASES (example grid files, the seeded random
    grids and the mp-1 charge density in tests/data/grid_inputs) is compared to
-   tests/data/grid_barcodes/<name>.npz, bar by bar, within EPS. This is the
-   regression harness for the merge tree backend: an optimized backend must
-   reproduce these files. Barcodes are compared in CANONICAL form (see
+   tests/data/grid_barcodes/<name>.npz, bar by bar, within EPS, through both
+   backends: grid_merge_tree (arcs generated on the fly, what merge_tree()
+   uses for grids) and the generic merge_tree on the explicit arc arrays.
+   This is the regression harness for the merge tree backend: an optimized
+   backend must reproduce these files. Barcodes are compared in CANONICAL form (see
    canonical): zero-length bars dropped, bars with equal (birth, death) summed,
    bars with zero total multiplicity dropped. The signed barcode of a component
    whose periodicity rank jumps by more than one at a single filtration value
@@ -28,6 +30,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from periodica import _periodica  # noqa: E402
 from periodica.core import Periodica, read_barcodes, write_barcodes  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -105,6 +108,17 @@ def compute(name):
     return p, p.barcodes()
 
 
+def generic_barcodes(p, arcs=None, arc_filtration=None, arc_shift=None):
+    """Barcodes through the generic backend on explicit arcs (by default the
+    arrays periodic_grid built), bypassing the grid-native path."""
+    arcs = p.quotient_arcs if arcs is None else arcs
+    arc_filtration = p.quotient_arc_filtration if arc_filtration is None else arc_filtration
+    arc_shift = p.quotient_arc_shift if arc_shift is None else arc_shift
+    tree = _periodica.merge_tree(p.n_quotient_vertices, p.d, p.V, arcs, arc_filtration, arc_shift,
+                                 p.quotient_vertex_filtration)
+    return _periodica.barcode(p.d, tree)
+
+
 # ---- 1. golden barcodes ----
 
 def regenerate():
@@ -120,7 +134,14 @@ def test_golden():
         p, bc = compute(name)
         d, ref, meta = read_barcodes(GOLDEN / f'{name}.npz')
         assert d == p.d, name
-        assert_match(bc, ref, label=name)
+        assert_match(bc, ref, label=f'{name} (grid_merge_tree)')
+        assert_match(generic_barcodes(p), ref, label=f'{name} (merge_tree on explicit arcs)')
+        # build_arcs=False: same tree without the arc arrays
+        q = Periodica()
+        q.periodic_grid(p.U, p.grid_values, sublevel=p.grid_field[0] == p.grid_values.ravel()[0], build_arcs=False)
+        assert not hasattr(q, 'quotient_arcs')
+        q.merge_tree()
+        assert_match(q.barcodes(), ref, label=f'{name} (build_arcs=False)')
         print(f'PASS golden {name} ({[len(b) for b in canonical(bc)]} bars per dimension)')
 
 
@@ -131,17 +152,15 @@ def test_arc_order():
     for name in ['2d_random_skew', '3d_random_skew', '3d_random_small_N']:
         p, bc = compute(name)
         for _ in range(3):
-            q = CASES[name]()
-            perm = rng.permutation(len(q.quotient_arcs))
-            q.quotient_arcs = q.quotient_arcs[perm]
-            q.quotient_arc_filtration = q.quotient_arc_filtration[perm]
-            q.quotient_arc_shift = q.quotient_arc_shift[:, perm]
+            perm = rng.permutation(len(p.quotient_arcs))
+            arcs = p.quotient_arcs[perm].copy()
+            arc_f = p.quotient_arc_filtration[perm]
+            shift = p.quotient_arc_shift[:, perm].copy()
             # also flip the orientation of some arcs (negated shift)
             flip = rng.random(len(perm)) < 0.5
-            q.quotient_arcs[flip] = q.quotient_arcs[flip][:, ::-1]
-            q.quotient_arc_shift[:, flip] = -q.quotient_arc_shift[:, flip]
-            q.merge_tree()
-            assert_match(q.barcodes(), bc, label=f'{name} shuffled')
+            arcs[flip] = arcs[flip][:, ::-1]
+            shift[:, flip] = -shift[:, flip]
+            assert_match(generic_barcodes(p, arcs, arc_f, shift), bc, label=f'{name} shuffled')
     print('PASS arc order and orientation invariance')
 
 

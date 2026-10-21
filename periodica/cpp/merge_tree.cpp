@@ -1,666 +1,504 @@
 #include "auxiliary.h"
-#include "delaunay.h"
 #include "merge_tree.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <limits>
+#include <numeric>
+#include <stdexcept>
 
 namespace PMT {
 using namespace Eigen;
+using std::vector;
 
-// Inverse of volume of input lattice, serve as multiplier for shadow monomial coefficient
-double inputVolumeInv = 1; 
+typedef std::array<int64_t, 3> Vec3;	// integer lattice vector, unused tail = 0
 
-// The class for lattice operations
-template <typename integer>
-class Lattice {
-	typedef Matrix<integer, Dynamic, Dynamic> MatrixType;
+static inline bool isZero(const Vec3& v) { return v[0] == 0 && v[1] == 0 && v[2] == 0; }
 
-private:
-	MatrixType V; // basis of the lattice
+// ---------------------------------------------------------------------------
+// Periodic lattice of a component: an integer basis of rank <= 3 in Hermite
+// normal form, held in fixed-size storage (no heap allocation).
+// ---------------------------------------------------------------------------
+struct Lattice {
+	int rank = 0;
+	int64_t B[3][3] = {};	// B[col][row]
 
-public:
-	Lattice() {}
-	Lattice(int dimension) { V = MatrixType(dimension, 0); }
-	Lattice(int dimension, int size) {
-		V = MatrixType(dimension, size); 
-		V.setZero();
-	}
-	Lattice(const MatrixType& V) : V(V) {}
-
-	integer dimension() const { return V.rows(); }
-	integer size() const { return V.cols(); }
-	MatrixType& basis() { return V; }
-
-	integer operator()(int i, int j) const { return V(i, j); }
-	integer& operator()(int i, int j) { return V(i, j); }
-
-	// joint two lattices
-	void operator+=(const Lattice& L) {
-		if (this->dimension() != L.dimension()) {
-			throw std::invalid_argument("lattices in different dimensions");
-		}
-		MatrixType NewBasis(this->dimension(), this->size() + L.size());
-		for (int i = 0; i < this->dimension(); ++i) {
-			for (int j = 0; j < this->size(); ++j) {
-				NewBasis(i, j) = V(i, j);
-			}
-			for (int j = 0; j < L.size(); ++j) {
-				NewBasis(i, j + this->size()) = L(i, j);
-			}
-		}
-		V = HermiteNormalForm(NewBasis);
-	}
-
-	// compute HNF of an integer matrix
-	MatrixType HermiteNormalForm(MatrixType& M) {
-		// column index, for implicit column exchange
-		std::vector<int> colid(M.cols()); 
-		for (int j = 0; j < M.cols(); ++j) colid[j] = j;
-		
-		// the reduction algorithm
-		int rows = M.rows(), cols = M.cols();
+	// Hermite normal form of the d x cols matrix M (columns are generators);
+	// returns the rank, the reduced columns are the first `rank` of M.
+	static int hnf(int d, int cols, int64_t M[6][3]) {
+		int colid[6];
+		for (int j = 0; j < cols; ++j) colid[j] = j;
 		int i, j = 0, k, l;
-		for (i = 0; i < rows; ++i) {
-			// find the first l >= j such that M(i, l) != 0
-			bool found = 0;
+		for (i = 0; i < d; ++i) {
+			bool found = false;
 			for (l = j; l < cols; ++l) {
-				if (M(i, colid[l]) != 0) {
-					swap(colid[j], colid[l]);
-					found = 1;
+				if (M[colid[l]][i] != 0) {
+					std::swap(colid[j], colid[l]);
+					found = true;
 					break;
 				}
 			}
 			if (!found) continue;
-			// make sure M(i, j) > 0
-			if (M(i, colid[j]) < 0) {
-				for (l = i; l < rows; ++l) {
-					M(l, colid[j]) = -M(l, colid[j]);
-				}
+			if (M[colid[j]][i] < 0) {
+				for (l = i; l < d; ++l) M[colid[j]][l] = -M[colid[j]][l];
 			}
 			for (k = j + 1; k < cols; ++k) {
-				if (M(i, colid[k]) != 0) {
-					// make sure M(i, k) > 0
-					if (M(i, colid[k]) < 0) {
-						for (l = i; l < rows; ++l) {
-							M(l, colid[k]) = -M(l, colid[k]);
-						}
+				if (M[colid[k]][i] != 0) {
+					if (M[colid[k]][i] < 0) {
+						for (l = i; l < d; ++l) M[colid[k]][l] = -M[colid[k]][l];
 					}
-					// euclidean algorithm for gcd
-					while (M(i, colid[j]) > 0 && M(i, colid[k]) > 0) {
-						integer t = M(i, colid[j]) / M(i, colid[k]);
-						if (t) { // substrace t * M(:, k) from M(:, j)
-							for (l = i; l < rows; ++l) {
-								M(l, colid[j]) -= M(l, colid[k]) * t;
-							}
+					while (M[colid[j]][i] > 0 && M[colid[k]][i] > 0) {
+						int64_t t = M[colid[j]][i] / M[colid[k]][i];
+						if (t) {
+							for (l = i; l < d; ++l) M[colid[j]][l] -= M[colid[k]][l] * t;
 						}
-						swap(colid[j], colid[k]);
+						std::swap(colid[j], colid[k]);
 					}
 				}
 			}
-			// reduce columns precede to j
 			for (k = 0; k < j; ++k) {
-				integer t = M(i, colid[k]) / M(i, colid[j]);
-				if (t) { // substrace t * M(:, j) from M(:, k)
-					for (l = i; l < rows; ++l) {
-						M(l, colid[k]) -= M(l, colid[j]) * t;
-					}
+				int64_t t = M[colid[k]][i] / M[colid[j]][i];
+				if (t) {
+					for (l = i; l < d; ++l) M[colid[k]][l] -= M[colid[j]][l] * t;
 				}
 			}
 			j += 1;
 		}
-		
-		// collect the final result
-		int finalsize = j;
-		MatrixType Reduced(rows, finalsize);
-		for (i = 0; i < rows; ++i) {
-			for (j = 0; j < finalsize; ++j) {
-				Reduced(i, j) = M(i, colid[j]);
+		int64_t R[6][3];
+		for (k = 0; k < j; ++k) {
+			for (l = 0; l < d; ++l) R[k][l] = M[colid[k]][l];
+		}
+		for (k = 0; k < j; ++k) {
+			for (l = 0; l < d; ++l) M[k][l] = R[k][l];
+		}
+		return j;
+	}
+
+	// join with the lattice generated by the columns of G (count k)
+	void join(int d, const int64_t (*G)[3], int k) {
+		int64_t M[6][3] = {};
+		for (int c = 0; c < rank; ++c) for (int r = 0; r < d; ++r) M[c][r] = B[c][r];
+		for (int c = 0; c < k; ++c) for (int r = 0; r < d; ++r) M[rank + c][r] = G[c][r];
+		rank = hnf(d, rank + k, M);
+		for (int c = 0; c < rank; ++c) for (int r = 0; r < d; ++r) B[c][r] = M[c][r];
+	}
+	void join(int d, const Vec3& v) {
+		int64_t G[1][3] = {{v[0], v[1], v[2]}};
+		join(d, G, 1);
+	}
+	void join(int d, const Lattice& L) { join(d, L.B, L.rank); }
+
+	// vol_p of the lattice spanned by U * B (p = rank); 1 for the empty lattice
+	double volume(int d, const Matrix3d& U) const {
+		if (rank == 0) return 1.0;
+		double C[3][3];	// C[col][row] = U * B
+		for (int c = 0; c < rank; ++c) {
+			for (int r = 0; r < d; ++r) {
+				double s = 0;
+				for (int l = 0; l < d; ++l) s += U(r, l) * double(B[c][l]);
+				C[c][r] = s;
 			}
 		}
-		return Reduced;
+		if (rank == 1) {
+			double s = 0;
+			for (int r = 0; r < d; ++r) s += C[0][r] * C[0][r];
+			return std::sqrt(s);
+		}
+		if (rank == d) {
+			if (d == 2) return std::abs(C[0][0] * C[1][1] - C[0][1] * C[1][0]);
+			return std::abs(C[0][0] * (C[1][1] * C[2][2] - C[1][2] * C[2][1])
+			              - C[1][0] * (C[0][1] * C[2][2] - C[0][2] * C[2][1])
+			              + C[2][0] * (C[0][1] * C[1][2] - C[0][2] * C[1][1]));
+		}
+		// rank 2 in 3D: area of the parallelogram (cross product)
+		double x = C[0][0] * C[1][1] - C[1][0] * C[0][1];
+		double y = C[0][1] * C[1][2] - C[1][1] * C[0][2];
+		double z = C[0][2] * C[1][0] - C[1][2] * C[0][0];
+		return std::sqrt(x * x + y * y + z * z);
 	}
 };
 
-// compute the volume of a lattice up to 3D
-template <typename Matrix, typename Lattice>
-double Volume(const Matrix& U, const Lattice& L) {
-	if (L.size() == 0) { // vol_0
-		return 1.0;
-	}
-	Matrix B(L.dimension(), L.size());
-	for (int i = 0; i < L.dimension(); ++i) {
-		for (int j = 0; j < L.size(); ++j) {
-			B(i, j) = L(i, j) * 1.0;
-		}
-	}
-	B = U * B;
-	if (L.size() == 1) { // vol_1
-		return B.norm();
-	}
-	if (L.size() == L.dimension()) { // full rank
-		return abs(B.determinant());
-	}
-	// vol_2 of 3D lattice (cross product)
-	double x, y, z;
-	x = B(0, 0) * B(1, 1) - B(0, 1) * B(1, 0);
-	y = B(1, 0) * B(2, 1) - B(1, 1) * B(2, 0);
-	z = B(2, 0) * B(0, 1) - B(2, 1) * B(0, 0);
-	return sqrt(x * x + y * y + z * z);
+// ---------------------------------------------------------------------------
+// MergeTree storage
+// ---------------------------------------------------------------------------
+void MergeTree::init(int d_, int n_, double volumeInv_, const double* f) {
+	d = d_; n = n_; volumeInv = volumeInv_;
+	birth.assign(f, f + n);
+	events.clear(); next.clear();
+	head.assign(n, -1); tail.assign(n, -1); death.assign(n, -1);
+	deathTime.assign(n, std::numeric_limits<double>::infinity());
 }
 
-const double pi = acos(-1.0);
-std::vector<double> unitBallVolume = { 1, 2, 1, 4.0 / 3 };
+void MergeTree::push(int beam, const Event& e) {
+	int id = (int)events.size();
+	events.push_back(e);
+	next.push_back(-1);
+	if (tail[beam] == -1) head[beam] = id; else next[tail[beam]] = id;
+	tail[beam] = id;
+}
 
-class Event {
-private:
-	double _time; // time of the event
-	int _child; // if it's a merger event, record the root of the child component. -1 for null.
-	double _ratio; // vol_p / vol_d
-	int _exponent; // exponent of the shadow monomial
+const Event& MergeTree::last(int beam) const {
+	static thread_local Event b;
+	if (tail[beam] == -1) {
+		b = Event{birth[beam], volumeInv, d, -1};
+		return b;
+	}
+	return events[tail[beam]];
+}
 
+void MergeTree::beam(int i, vector<Event>& out) const {
+	out.clear();
+	out.push_back(Event{birth[i], volumeInv, d, -1});
+	for (int e = head[i]; e != -1; e = next[e]) out.push_back(events[e]);
+	if (death[i] != -1) out.push_back(events[death[i]]);
+}
+
+MergeTree::List MergeTree::toList() const {
+	List result(n);
+	vector<Event> epoch;
+	for (int i = 0; i < n; ++i) {
+		beam(i, epoch);
+		result[i].reserve(epoch.size());
+		for (const Event& e : epoch) result[i].push_back({e.time, e.ratio, e.exponent, e.child});
+	}
+	return result;
+}
+
+// Rebuild the storage from the list form (births are the first events; a
+// final event whose child is the beam itself is the death record).
+MergeTree MergeTree::fromList(const List& tree) {
+	MergeTree t;
+	int n = (int)tree.size();
+	vector<double> f(n, 0.0);
+	int d = 0;
+	double inv = 1;
+	for (int i = 0; i < n; ++i) {
+		if (tree[i].empty()) throw std::invalid_argument("beam without birth event");
+		f[i] = std::get<0>(tree[i][0]);
+		d = std::max(d, std::get<2>(tree[i][0]));
+		inv = std::get<1>(tree[i][0]);
+	}
+	t.init(d, n, inv, f.data());
+	for (int i = 0; i < n; ++i) {
+		for (size_t j = 1; j < tree[i].size(); ++j) {
+			auto [time, ratio, exponent, child] = tree[i][j];
+			Event e{time, ratio, exponent, child};
+			if (child == i && j + 1 == tree[i].size()) {
+				t.events.push_back(e); t.next.push_back(-1);
+				t.death[i] = (int)t.events.size() - 1;
+				t.deathTime[i] = time;
+			}
+			else t.push(i, e);
+		}
+	}
+	return t;
+}
+
+// ---------------------------------------------------------------------------
+// Union-find with lattice drift potentials
+// ---------------------------------------------------------------------------
+class Forest {
 public:
-	Event() : _time(0), _child(-1), _ratio(1), _exponent(0) {}
+	int d, n;
+	Matrix3d U;
+	double volumeInv;
+	MergeTree* tree;
+	vector<int> parent, size, oldId, lat;	// lat: index into lattices, -1 = trivial
+	vector<std::array<int32_t, 3>> pot;		// drift relative to the parent
+	vector<double> old;						// birth of the oldest vertex (roots)
+	vector<Lattice> lattices;
+	vector<int> path;
 
-	// notice that the second parameter is vol(periodic lattice) / vol(input lattice), instead of real coefficient
-	Event(double time, int child, double ratio, int exponent)
-		: _time(time), _child(child), _ratio(ratio), _exponent(exponent) {}
-
-	double& time() { return _time; }
-	int& child() { return _child; }
-	double ratio() const { return _ratio; }
-	int exponent() const { return _exponent; }
-
-	bool operator==(const Event& other) const {
-		if (_exponent != other.exponent()) return false;
-		if (abs(_ratio - other.ratio()) < 1e-9) return true;
-		return false;
+	Forest(int d_, int n_, const MatrixXd& V, const double* f, MergeTree* t)
+		: d(d_), n(n_), tree(t) {
+		U.setIdentity();
+		for (int i = 0; i < d; ++i) for (int j = 0; j < d; ++j) U(i, j) = V(i, j);
+		volumeInv = 1.0 / std::abs(U.determinant());
+		parent.resize(n); std::iota(parent.begin(), parent.end(), 0);
+		size.assign(n, 1);
+		oldId.resize(n); std::iota(oldId.begin(), oldId.end(), 0);
+		lat.assign(n, -1);
+		pot.assign(n, {0, 0, 0});
+		old.assign(f, f + n);
+		tree->init(d, n, volumeInv, f);
 	}
 
-	bool operator>(const Event& other) const {
-		if (_exponent > other.exponent()) return true;
-		if (_ratio - other.ratio() >= 1e-9) return true;
-		return false;
+	// root of v; drift = lattice position of v relative to its root
+	int find(int v, Vec3& drift) {
+		path.clear();
+		int u = v;
+		while (parent[u] != u) { path.push_back(u); u = parent[u]; }
+		int root = u;
+		// compress from the top: pot of each node becomes relative to the root
+		for (int i = (int)path.size() - 2; i >= 0; --i) {
+			int a = path[i], b = path[i + 1];
+			pot[a][0] += pot[b][0]; pot[a][1] += pot[b][1]; pot[a][2] += pot[b][2];
+			parent[a] = root;
+		}
+		if (v == root) drift = {0, 0, 0};
+		else drift = {pot[v][0], pot[v][1], pot[v][2]};
+		return root;
 	}
 
-	std::string toString() {
-		char s[50];
-		std::snprintf(s, sizeof(s), "%.3f %sR^%d", _ratio * unitBallVolume[_exponent], (_exponent > 1 ? "pi" : ""), _exponent);
-		return std::string(s);
-	}
-};
-
-// the base class for 0- and 1-dimensional simplex (vertex & arc)
-class Simplex {
-private:
-	int _p; // dimension of the simplex
-	double _filtration; // filtration value
-
-public:
-	Simplex() : _p(0), _filtration(0) {}
-	Simplex(int p, double f) : _p(p), _filtration(f) {}
-
-	int order() { return _p; }
-	double filtration() { return _filtration; }
-};
-
-template <typename integer>
-class Arc : public Simplex {
-	typedef Matrix<integer, Dynamic, 1> Vector;
-
-private:
-	int _source, _target; // index of source & target
-	Vector _shift; // shift vector
-
-public:
-	Arc() : Simplex(1, 0), _source(0), _target(0) { _shift = Vector(0, 1); }
-	// construct with dimensionality
-	Arc(int s, int t, double f, int d)
-		: Simplex(1, f), _source(s), _target(t) {
-		_shift = Vector(d, 1);
-		_shift.setZero();
-	}
-	// construct with nonzero shift vector
-	Arc(int s, int t, double f, Vector v)
-		: Simplex(1, f), _source(s), _target(t), _shift(v) {}
-
-	int source() { return _source; }
-	int target() { return _target; }
-	Vector shift() const { return _shift; }
-	void negateShift() { _shift = -_shift; }
-};
-
-
-template <typename integer>
-class Vertex : public Simplex {
-	typedef Matrix<integer, Dynamic, 1> Vector;
-	typedef Lattice<integer> LatticeType;
-
-private:
-	int _root, _next; // indices of root, next. -1 for null.
-	int _size; // size of subtree
-	double _old; // birth time of the oldest child
-	int _oldId; // index of the oldest child
-	Vector _drift; // the drift vector
-	LatticeType _lattice; // the periodic lattice
-
-public:
-	Vertex() : Simplex(0, 0), _root(0), _next(-1), _size(1), _old(0.0), _oldId(0) {
-		_drift = Vector(0, 1);
-		_lattice = LatticeType(_drift);
+	const Lattice& lattice(int r) const {
+		static const Lattice trivial;
+		return lat[r] == -1 ? trivial : lattices[lat[r]];
 	}
 
-	// construct with filtration value, dimensionality, and index
-	Vertex(int id, double f, int d) : Simplex(0, f), _root(id), _next(-1), _size(1), _old(f), _oldId(id) {
-		_drift = Vector(d, 1); _drift.setZero();
-		_lattice = LatticeType(d);
-	}
-
-	void driftAdd(const Vector& v) {
-		_drift += v;
-	}
-
-	int& root() { return _root; }
-	int& next() { return _next; }
-	int& size() { return _size; }
-	double& old() { return _old; }
-	int& oldId() { return _oldId; }
-	Vector& drift() { return _drift; }
-	LatticeType& lattice() { return _lattice; }
-};
-
-typedef int integer;
-
-using namespace std;
-
-struct filtrationComparator {
-	bool operator()(Simplex& a, Simplex& b) const {
-		return a.filtration() < b.filtration();
-	}
-};
-
-template <typename Matrix, typename VertexList, typename ArcList, typename EventList>
-void process(int d, Matrix& inputBasis, VertexList& vertices, ArcList& arcs, vector<EventList>& beams) {
-	// record birth events for each vertex
-	for (auto v : vertices) {
-		beams[v.root()].push_back(Event(v.old(), -1, inputVolumeInv, d));
-	}
-
-	// sort the arcs in non-decreasing order
-	std::sort(begin(arcs), end(arcs), filtrationComparator());
-
-	// myDebug("Sorted filtration:\n");
-	// for (auto a : arcs) {
-	// 	myDebug("%.3f ", a.filtration());
-	// }
-	// myDebug("\n");
-	// cout << "input basis:\n" << inputBasis << endl;
-
-	// union-find algorithm for PMT
-	int x, y, r, s, z, last, p, rOldId, sOldId;
-	double time = 0, vol_p;
-	for (auto a : arcs) {
-		time = a.filtration();
-		x = a.source(), y = a.target();
-		r = vertices[x].root(), s = vertices[y].root();
-		rOldId = vertices[r].oldId(), sOldId = vertices[s].oldId();
-		if (r == s) { // catenation
-			if (beams[rOldId].back().ratio() == 1.0 && beams[rOldId].back().exponent() == 0) continue;
-			Lattice<integer> L(vertices[x].drift() + a.shift() - vertices[y].drift());
-			vertices[r].lattice() += L;
-			// compute shadow monomial, insert new event
-			p = vertices[r].lattice().size();
-			vol_p = Volume(inputBasis, vertices[r].lattice());
-			if (beams[rOldId].back().ratio() < vol_p * inputVolumeInv + 1e-8 && beams[rOldId].back().exponent() == d - p) continue;
-			beams[rOldId].push_back(Event(time, -1, vol_p * inputVolumeInv, d - p));
-#ifdef debuging
-			// auto v = L.basis();
-			// int inf_norm = 0;
-			// for (int i = 0; i < v.rows(); ++i) {
-			// 	inf_norm = max(inf_norm, abs(v(i,0)));
-			// }
-			// if (inf_norm <= 2) {
-			printf("\n** catenation %d -> %d\n", x, y);
-			cout << "time: " << time << endl;
-			cout << "shift:\n" << a.shift() << endl;
-			cout << "v:\n" << L.basis() << endl;
-			cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
-			cout << "vol_p: " << vol_p << endl;
-			cout << "monomial: " << beams[rOldId][beams[rOldId].size() - 2].toString() << " -> " << beams[rOldId].back().toString() << endl;
-			// }
-#endif
+	// arc x -> y with lattice shift s at `time`
+	void arc(int x, int y, const Vec3& s, double time) {
+		Vec3 dx, dy;
+		int r = find(x, dx), q = find(y, dy);
+		Vec3 v = {dx[0] + s[0] - dy[0], dx[1] + s[1] - dy[1], dx[2] + s[2] - dy[2]};
+		if (r == q) { // catenation
+			if (isZero(v)) return;	// contractible cycle: nothing changes
+			int rOldId = oldId[r];
+			Event cur = tree->last(rOldId);
+			if (cur.ratio == 1.0 && cur.exponent == 0) return;	// already fully periodic
+			if (lat[r] == -1) { lat[r] = (int)lattices.size(); lattices.emplace_back(); }
+			Lattice& L = lattices[lat[r]];
+			int rank0 = L.rank;
+			double vol0 = L.volume(d, U);
+			L.join(d, v);
+			if (L.rank == rank0 && std::abs(L.volume(d, U) - vol0) < 1e-12 * std::max(1.0, vol0)) return;
+			double vol_p = L.volume(d, U);
+			if (cur.ratio < vol_p * volumeInv + 1e-8 && cur.exponent == d - L.rank) return;
+			tree->push(rOldId, Event{time, vol_p * volumeInv, d - L.rank, -1});
 		}
 		else { // merger
-			// record index of oldest vertex in both components
-			if (vertices[r].old() > vertices[s].old()) {
-				swap(rOldId, sOldId);
+			int rOldId = oldId[r], sOldId = oldId[q];
+			if (old[r] > old[q]) std::swap(rOldId, sOldId);
+			// union by size: q (with y) merges into r (with x)
+			if (size[r] < size[q]) {
+				std::swap(r, q);
+				v = {-v[0], -v[1], -v[2]};
 			}
-			// make sure size(s) <= size(r), and merge s -> r
-			if (vertices[r].size() < vertices[s].size()) {
-				swap(r, s);
-				swap(x, y);
-				a.negateShift();
+			if (old[r] > old[q]) old[r] = old[q];
+			oldId[r] = rOldId;
+			// lattice of the union
+			if (lat[q] != -1) {
+				if (lat[r] == -1) lat[r] = lat[q];
+				else lattices[lat[r]].join(d, lattices[lat[q]]);
 			}
-			if (vertices[r].old() > vertices[s].old()) {
-				vertices[r].old() = vertices[s].old();
-				// vertices[r].oldId() = vertices[s].oldId();
-			}
-			vertices[r].oldId() = rOldId;
-			vertices[r].lattice() += vertices[s].lattice();
-			Eigen::Matrix<integer, Dynamic, 1> v(vertices[x].drift() + a.shift() - vertices[y].drift());
-			z = s;
-			while (z != -1) {
-				vertices[z].root() = r;
-				vertices[z].drift() += v;
-				last = z;
-				z = vertices[z].next();
-			}
-			vertices[r].size() += vertices[s].size();
-			vertices[last].next() = vertices[r].next();
-			vertices[r].next() = s;
-			// update shadow monomial, insert new event
-			p = vertices[r].lattice().size();
-			vol_p = Volume(inputBasis, vertices[r].lattice());
-			beams[rOldId].push_back(Event(time, sOldId, vol_p * inputVolumeInv, d - p));
-#ifdef debuging
-			// printf("\n** merger %d -> %d\n", x, y);
-			// cout << "time: " << time << endl;
-			// cout << "shift:\n" << a.shift() << endl;
-			// cout << "v:\n" << v << endl;
-			// cout << "new lattice:\n" << vertices[r].lattice().basis() << endl;
-			// cout << "vol_p: " << vol_p << endl;
-			// cout << "merge " << vertices[s].oldId() << " -> " << vertices[r].oldId() << endl;
-			// cout << "monomial: " << beams[rOldId][beams[rOldId].size() - 2].toString() << " -> " << beams[rOldId].back().toString() << endl;
-#endif
+			parent[q] = r;
+			pot[q] = {(int32_t)v[0], (int32_t)v[1], (int32_t)v[2]};
+			size[r] += size[q];
+			const Lattice& L = lattice(r);
+			double vol_p = L.volume(d, U);
+			tree->push(rOldId, Event{time, vol_p * volumeInv, d - L.rank, sOldId});
+			tree->death[sOldId] = (int)tree->events.size() - 1;
+			tree->deathTime[sOldId] = time;
 		}
-	}
-}
-
-// append last event to the beams that merged to other beams
-template <typename EventList>
-void addRightEnd(vector<EventList>& beams) {
-	for (int i = 0; i < beams.size(); ++i) {
-		for (auto event : beams[i]) {
-			if (event.child() != -1 && event.child() != i) {
-				beams[event.child()].push_back(event);
-			}
-		}
-	}
-}
-
-// print periodic merge tree
-template <typename EventList>
-void printBeams(vector<EventList>& beams) {
-	for (int i = 0; i < beams.size(); ++i) {
-		printf("%d:\n", i);
-		for (auto event : beams[i]) {
-			printf(" time: %.3f, monomial: %s", event.time(), event.toString().c_str());
-			if (event.child() != -1) {
-				if (event.child() == i) printf(", dies");
-				else printf(", child: %d", event.child());
-			}
-			printf("\n");
-		}
-	}
-}
-
-class Barcode {
-private:
-	double _birth, _death, _multiplicity;
-public:
-	Barcode() : _birth(std::numeric_limits<double>::lowest()), _death(std::numeric_limits<double>::infinity()), _multiplicity(0) {}
-	Barcode(double birth, double death, double multiplicity)
-		: _birth(birth), _death(death), _multiplicity(multiplicity) {}
-
-	double birth() { return _birth; }
-	double death() { return _death; }
-	double multiplicity() { return _multiplicity; }
-
-	std::string toString() {
-		char s[100];
-		if (std::isinf(_death)) {
-			std::snprintf(s, sizeof(s), "[%.3f, +inf) %.3f", _birth, _multiplicity);
-		}
-		else {
-			std::snprintf(s, sizeof(s), "[%.3f, %.3f] %.3f", _birth, _death, _multiplicity);
-		}
-		return std::string(s);
 	}
 };
 
-// for sorting barcodes
-struct barcodeComparator {
-	bool operator()(Barcode& a, Barcode& b) {
-		if (a.birth() < b.birth()) return true;
-		else if (a.birth() == b.birth()) return a.death() < b.death();
-		else return false;
-	}
-};
-
-// print barcode in different eras
-template <typename EventList>
-void constructBarcodes(vector<EventList>& beams, vector<vector<Barcode>>& barcodes) {
-	int i, j, k;
-	double birth, death;
-	constexpr double inf = std::numeric_limits<double>::infinity();
-	for (i = 0; i < beams.size(); ++i) {
-		EventList& epoch = beams[i];
-		myDebug("%d: %d epoches\n", i, epoch.size());
-		birth = epoch[0].time();
-		for (j = 0; j < epoch.size(); ) {
-			myDebug(" %d time: %.3f monomial: %s child: %d, ", j, epoch[j].time(), epoch[j].toString().c_str(), epoch[j].child());
-			for (k = j + 1; k < epoch.size(); ++k) { // find the shadow monomial beam[k] > beam[j]
-				if (epoch[j] > epoch[k]) {
-					break;
-				}
-			}
-			if (k == epoch.size()) {
-				if (epoch[k - 1].child() != i) { 
-					// never die
-					myDebug("case 1 | ");
-					barcodes[epoch[j].exponent()].push_back(Barcode(birth, inf, epoch[j].ratio()));
-					myDebug("%dd %s", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
-				}
-				else { 
-					// merger with the same monomial
-					myDebug("case 2 | ");
-					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch.back().time(), epoch[j].ratio()));
-					myDebug("%dd %s", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
-				}
-			}
-			else {
-				if (epoch[j].exponent() != epoch[k].exponent()) { 
-					// different exponents, split into different dimensions
-					myDebug("case 3 | ");
-					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio()));
-					myDebug("%dd %s, ", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
-					if (k == epoch.size() - 1 && epoch[k].child() == i) break;
-					barcodes[epoch[k].exponent()].push_back(Barcode(birth, epoch[k].time(), -epoch[k].ratio()));
-					myDebug("%dd %s", epoch[k].exponent(), barcodes[epoch[k].exponent()].back().toString().c_str());
-				}
-				else { 
-					// same exponent, (epoch[j].ratio() - epoch[k].ratio()) components die
-					myDebug("case 4 | ");
-					barcodes[epoch[j].exponent()].push_back(Barcode(birth, epoch[k].time(), epoch[j].ratio() - epoch[k].ratio()));
-					myDebug("%dd %s", epoch[j].exponent(), barcodes[epoch[j].exponent()].back().toString().c_str());
-				}
-			}
-			j = k;
-			myDebug("\n");
-		}
-	}
-}
-
-void printBarcodes(vector<vector<Barcode>>& barcodes) { 
-	int i, j;
-	for (i = barcodes.size() - 1; i >= 0; --i) {
-		printf("%d-th:\n", i);
-		sort(begin(barcodes[i]), end(barcodes[i]), barcodeComparator());
-		for (j = 0; j < barcodes[i].size(); ++j) {
-			printf(" %s\n", barcodes[i][j].toString().c_str());
-		}
-	}
-}
-
-// Compute periodic merge tree from a quotient complex
-// Input:
-//	Number of vertices: int
-// 	Dimension: int
-// 	Lattice basis: MatrixXd(d, d)
-// 	Arcs: MatrixXi(M, 2)
-//	Arc filtration value: VectorXd(M)
-//	Arc shift vector: MatrixXd(d, M)
-// 	(Optional) Vertex filtration value: VectorXd(N), 0 by default
-// Output:
-// 	Periodic merge tree: vector<vector<Event>>, where Event is a tuple containing
-//	 Time: double -- the time that the event happends
-//	 Coefficient: double -- coefficient of the shadow monomial
-//	 Exponent: int -- exponent of the shadow monomial
-// 	 Child: int -- root of the branch merged to current branch, -1 if it's not a merger
-std::vector<std::vector<std::tuple<double, double, int, int>>> mergeTree (
-	int n, 						// number of vertices
-	int d, 						// dimension
-	const Eigen::MatrixXd& V, 	// lattice basis
-	const Eigen::MatrixXi& arcs, 
+// ---------------------------------------------------------------------------
+// Generic quotient complex
+// ---------------------------------------------------------------------------
+MergeTree mergeTree (
+	int n, int d,
+	const Eigen::MatrixXd& V,
+	const Eigen::MatrixXi& arcs,
 	const Eigen::VectorXd& arc_filtration,
 	const Eigen::MatrixXi& arc_shift,
 	Eigen::VectorXd& vertex_filtration
 ) {
-	if (d != V.rows() || V.cols() < V.rows()) {
-        throw std::invalid_argument("Invalid lattice basis");
-	}
-	if (d != arc_shift.rows()) {
-        throw std::invalid_argument("Shift vectors does not match dimension");
-	}
-	if (arcs.rows() != arc_filtration.size()) {
+	if (d != 2 && d != 3) throw std::invalid_argument("dimension must be 2 or 3");
+	if (d != V.rows() || V.cols() < V.rows()) throw std::invalid_argument("Invalid lattice basis");
+	if (d != arc_shift.rows()) throw std::invalid_argument("Shift vectors does not match dimension");
+	if (arcs.rows() != arc_filtration.size() || arcs.cols() != 2 || arc_shift.cols() != arcs.rows()) {
 		throw std::invalid_argument("Number of arcs does not match filtration values");
 	}
-	if (vertex_filtration.size() == 0) {
-		vertex_filtration = Eigen::VectorXd::Zero(n);
-	}
-	else if (n != vertex_filtration.size()) {
-		throw std::invalid_argument("Number of vertices does not match filtration values");
-	}
+	if (vertex_filtration.size() == 0) vertex_filtration = VectorXd::Zero(n);
+	else if (n != vertex_filtration.size()) throw std::invalid_argument("Number of vertices does not match filtration values");
 
-	auto validFiltration = [&arcs, &arc_filtration, &vertex_filtration]() -> bool {
-		for (int i = 0; i < arcs.rows(); ++i) {
-			int s = arcs(i, 0), t = arcs(i, 1);
-			if (arc_filtration(i) < vertex_filtration(s) || arc_filtration(i) < vertex_filtration(t)) {
-				return false;
-			}
-		}
-		return true;
-	};
-
-	if (!validFiltration()) {
-		throw std::invalid_argument("Input is not a valid filtration");
-	}
-
-	using Vector = Matrix<integer, Dynamic, 1>;
-	using Matrix = Matrix<double, Dynamic, Dynamic>;
-	using Vertex = Vertex<integer>;
-	using Arc = Arc<integer>;
-
-	// Copy the lattice basis
-	Matrix U(d, d);
-	for (int i = 0; i < d; ++i) {
-		for (int j = 0; j < d; ++j) {
-			U(i, j) = V(i, j);
-		}
-	}
-
-	// Compute volume of unit cell
-	inputVolumeInv = 1.0 / abs(U.determinant());
-
-	// Create vertices
-	vector<Vertex> _vertices;
-	for (int i = 0; i < n; ++i) {
-		_vertices.push_back(Vertex(i, vertex_filtration(i), d));
-	}
-	
-	// Create arcs
-	int m = arcs.rows();
-	vector<Arc> _arcs;
+	int m = (int)arcs.rows();
 	for (int i = 0; i < m; ++i) {
-		_arcs.push_back(Arc(arcs(i, 0), arcs(i, 1), arc_filtration(i), arc_shift.col(i)));
-	}
-
-	// Compute periodic merge tree
-	vector<vector<Event>> beams(n);
-	process(d, U, _vertices, _arcs, beams);
-	addRightEnd(beams);
-
-	// Get results
-	std::vector<std::vector<std::tuple<double, double, int, int>>> result(n);
-	for (int i = 0; i < n; ++i) {
-		for (auto event : beams[i]) {
-			result[i].push_back({event.time(), event.ratio(), event.exponent(), event.child()});
+		int s = arcs(i, 0), t = arcs(i, 1);
+		if (s < 0 || s >= n || t < 0 || t >= n) throw std::invalid_argument("Arc endpoint out of range");
+		if (arc_filtration(i) < vertex_filtration(s) || arc_filtration(i) < vertex_filtration(t)) {
+			throw std::invalid_argument("Input is not a valid filtration");
 		}
 	}
 
-	return result;
+	MergeTree tree;
+	Forest forest(d, n, V, vertex_filtration.data(), &tree);
+
+	// arcs in non-decreasing filtration order (sort compact pairs, not arcs)
+	vector<std::pair<double, int>> order(m);
+	for (int i = 0; i < m; ++i) order[i] = {arc_filtration(i), i};
+	std::sort(order.begin(), order.end());
+
+	for (const auto& [time, i] : order) {
+		Vec3 s = {arc_shift(0, i), arc_shift(1, i), d == 3 ? arc_shift(2, i) : 0};
+		forest.arc(arcs(i, 0), arcs(i, 1), s, time);
+	}
+	return tree;
 }
 
-
-// Print periodic merge tree in a nice format
-// Input:
-// 	Periodic merge tree as lists of events
-void printMergeTree(
-	const std::vector<std::vector<std::tuple<double, double, int, int>>>& tree
+// ---------------------------------------------------------------------------
+// Periodic grid (lower-star filtration), arcs generated on the fly
+// ---------------------------------------------------------------------------
+MergeTree gridMergeTree (
+	int d,
+	const Eigen::MatrixXd& U,
+	const std::vector<int>& shape,
+	const Eigen::VectorXd& f,
+	const Eigen::MatrixXi& directions
 ) {
+	if (d != 2 && d != 3) throw std::invalid_argument("dimension must be 2 or 3");
+	if ((int)shape.size() != d || U.rows() != d || U.cols() != d) throw std::invalid_argument("shape / U do not match dimension");
+	if (directions.rows() != d || directions.cols() != d) throw std::invalid_argument("directions must be d x d");
+	int64_t N[3] = {1, 1, 1};
+	int64_t n = 1;
+	for (int k = 0; k < d; ++k) {
+		if (shape[k] < 1) throw std::invalid_argument("shape entries must be positive");
+		N[k] = shape[k]; n *= N[k];
+	}
+	if (f.size() != n) throw std::invalid_argument("field size does not match shape");
+	if (n > std::numeric_limits<int>::max()) throw std::invalid_argument("grid too large");
+
+	MergeTree tree;
+	Forest forest(d, (int)n, U, f.data(), &tree);
+
+	// insertion order: vertices by non-decreasing value; pos[v] = rank of v
+	vector<int> order(n), pos(n);
+	std::iota(order.begin(), order.end(), 0);
+	std::stable_sort(order.begin(), order.end(), [&f](int a, int b) { return f[a] < f[b]; });
+	for (int i = 0; i < n; ++i) pos[order[i]] = i;
+
+	// C-order strides
+	int64_t stride[3] = {1, 1, 1};
+	for (int k = d - 2; k >= 0; --k) stride[k] = stride[k + 1] * N[k + 1];
+
+	int64_t idx[3], tgt[3];
+	for (int i = 0; i < n; ++i) {
+		int v = order[i];
+		int64_t rem = v;
+		for (int k = 0; k < d; ++k) { idx[k] = rem / stride[k]; rem %= stride[k]; }
+		for (int k = 0; k < d; ++k) {
+			for (int sign = 1; sign >= -1; sign -= 2) {
+				int64_t u = 0;
+				Vec3 s = {0, 0, 0};
+				for (int l = 0; l < d; ++l) {
+					tgt[l] = idx[l] + sign * directions(l, k);
+					int64_t q = tgt[l] >= 0 ? tgt[l] / N[l] : -((-tgt[l] + N[l] - 1) / N[l]);	// floor
+					s[l] = q;
+					u += (tgt[l] - q * N[l]) * stride[l];
+				}
+				if (u == v) {	// self-loop (N_l = 1 along the direction): one arc per grid point
+					if (sign == 1) forest.arc(v, v, s, f[v]);
+					continue;
+				}
+				if (pos[(int)u] < i) forest.arc(v, (int)u, s, f[v]);
+			}
+		}
+	}
+	return tree;
+}
+
+// ---------------------------------------------------------------------------
+// Printing
+// ---------------------------------------------------------------------------
+const double pi = acos(-1.0);
+static std::string monomial(const Event& e) {
+	static const double unitBallVolume[4] = {1, 2, 1, 4.0 / 3};
+	char s[50];
+	std::snprintf(s, sizeof(s), "%.3f %sR^%d", e.ratio * unitBallVolume[e.exponent], (e.exponent > 1 ? "pi" : ""), e.exponent);
+	return std::string(s);
+}
+
+void printMergeTree(const MergeTree& tree) {
 	printf("** Periodic merge tree **\n");
+	vector<Event> epoch;
 	for (int i = 0; i < tree.size(); ++i) {
+		tree.beam(i, epoch);
 		printf("%d:\n", i);
-		for (auto [time, coeff, exponent, child] : tree[i]) {
-			printf(" time: %.3f, monomial: %s", time, Event(0, 0, coeff, exponent).toString().c_str());
-			if (child != -1) {
-				if (child == i) printf(" - merge ->");
-				else printf(" <- child: %d", child);
+		for (const Event& e : epoch) {
+			printf(" time: %.3f, monomial: %s", e.time, monomial(e).c_str());
+			if (e.child != -1) {
+				if (e.child == i) printf(" - merge ->");
+				else printf(" <- child: %d", e.child);
 			}
 			printf("\n");
 		}
 	}
 }
 
-// Compute periodic barcode from merge tree
-// Input:
-// 	Dimension: d
-//	Periodic merge tree as lists of events
-// Output:
-//	Lists of barcodes: vector<vector<Barcode>> of size d + 1, where Barcode is a tuple containing
-//	 Birth time: double
-//	 Death time: double
-//	 Multiplicity: double
-std::vector<std::vector<std::tuple<double, double, double>>> barcode(
-	int d,
-	const std::vector<std::vector<std::tuple<double, double, int, int>>>& tree
-) {
-	int n = size(tree);
-	
-	// From tuple to Event instance
-	vector<vector<Event>> beams(n);
-	for (int i = 0; i < n; ++i) {
-		for (auto [time, coeff, exponent, child] : tree[i]) {
-			beams[i].push_back(Event(time, child, coeff, exponent));
+// ---------------------------------------------------------------------------
+// Barcode
+// ---------------------------------------------------------------------------
+struct Bar {
+	double birth, death, multiplicity;
+};
+
+// shadow monomial comparison: a > b when a has a larger exponent or a larger ratio
+static inline bool greater(const Event& a, const Event& b) {
+	if (a.exponent > b.exponent) return true;
+	if (a.ratio - b.ratio >= 1e-9) return true;
+	return false;
+}
+
+std::vector<std::vector<std::tuple<double, double, double>>> barcode(int d, const MergeTree& tree, bool drop_zero_length) {
+	constexpr double inf = std::numeric_limits<double>::infinity();
+	vector<vector<Bar>> barcodes(d + 1);
+	vector<Event> epoch;
+	for (int i = 0; i < tree.size(); ++i) {
+		// fast path: a beam with no events of its own that died in a merger
+		// with the same monomial (nearly every vertex of a grid)
+		if (tree.head[i] == -1 && tree.death[i] != -1) {
+			if (drop_zero_length && tree.deathTime[i] == tree.birth[i]) continue;	// every bar of this beam is zero-length
+			const Event& e = tree.events[tree.death[i]];
+			Event b{tree.birth[i], tree.volumeInv, tree.d, -1};
+			if (!greater(b, e)) {
+				if (!(drop_zero_length && e.time == tree.birth[i])) {
+					barcodes[tree.d].push_back({tree.birth[i], e.time, tree.volumeInv});
+				}
+				continue;
+			}
+		}
+		tree.beam(i, epoch);
+		double birth = epoch[0].time;
+		size_t j, k;
+		for (j = 0; j < epoch.size(); ) {
+			for (k = j + 1; k < epoch.size(); ++k) {	// first monomial smaller than epoch[j]
+				if (greater(epoch[j], epoch[k])) break;
+			}
+			if (k == epoch.size()) {
+				if (epoch[k - 1].child != i) {	// never dies
+					barcodes[epoch[j].exponent].push_back({birth, inf, epoch[j].ratio});
+				}
+				else {	// merger with the same monomial
+					barcodes[epoch[j].exponent].push_back({birth, epoch.back().time, epoch[j].ratio});
+				}
+			}
+			else if (epoch[j].exponent != epoch[k].exponent) {	// split into different dimensions
+				barcodes[epoch[j].exponent].push_back({birth, epoch[k].time, epoch[j].ratio});
+				if (k == epoch.size() - 1 && epoch[k].child == i) break;
+				barcodes[epoch[k].exponent].push_back({birth, epoch[k].time, -epoch[k].ratio});
+			}
+			else {	// same exponent: ratio difference dies
+				barcodes[epoch[j].exponent].push_back({birth, epoch[k].time, epoch[j].ratio - epoch[k].ratio});
+			}
+			j = k;
 		}
 	}
 
-	// Construct barcodes
-	vector<vector<Barcode>> barcodes(d + 1);
-	constructBarcodes(beams, barcodes);
-
-	// Sort barcodes
-	for (int i = d; i >= 0; --i) {
-		sort(begin(barcodes[i]), end(barcodes[i]), barcodeComparator());
-	}
-
-	// Convert result to tuple
 	std::vector<std::vector<std::tuple<double, double, double>>> result(d + 1);
-	for (int i = 0; i < d + 1; ++i) {
-		for (auto b : barcodes[i]) {
-			result[i].push_back({b.birth(), b.death(), b.multiplicity()});
+	for (int e = 0; e <= d; ++e) {
+		std::sort(barcodes[e].begin(), barcodes[e].end(), [](const Bar& a, const Bar& b) {
+			if (a.birth < b.birth) return true;
+			if (a.birth == b.birth) return a.death < b.death;
+			return false;
+		});
+		result[e].reserve(barcodes[e].size());
+		for (const Bar& b : barcodes[e]) {
+			if (drop_zero_length && b.death == b.birth) continue;
+			result[e].push_back({b.birth, b.death, b.multiplicity});
 		}
 	}
-
 	return result;
 }
 

@@ -22,6 +22,8 @@ make setup      # installs what is missing: uv, bazelisk, node/npm (brew or ~/.l
   no-root download path (into `TOOLS_PREFIX`, default `~/.local`), whose `bin/` the Makefile
   prepends to `PATH` for all recipes. A C/C++ compiler is the one prerequisite it cannot install.
 - Build system is **Bazel with bzlmod** (`MODULE.bazel`); use `bazelisk` if `bazel` is absent.
+  `make build` builds with `-c opt` (`make build-debug` for an unoptimized build with debug
+  info; the merge tree is >10x slower without optimization, so never benchmark a debug build).
 - `make` bootstraps a **uv-managed Python 3.11 venv** at `.venv` with numpy/matplotlib/scipy,
   then runs `bazel build --enable_bzlmod //:periodica_so` and copies
   `bazel-bin/_periodica.so` → `periodica/_periodica.so`.
@@ -82,8 +84,10 @@ p.plot_geometry('delaunay', show=True, slidebar=True)   # interactive filtration
 
 Key native functions exposed by `_periodica` (see `periodica/cpp/periodica.cpp` for the full
 list): `periodic_delaunay`, `periodic_voronoi`, `full_delaunay`, `full_voronoi`,
-`merge_tree(n, d, V, arcs, arc_filtration, arc_shift, vertex_filtration=)`,
-`barcode(d, tree)`, `image(barcode, size, min, max)`, `dirichlet_domain`,
+`merge_tree(n, d, V, arcs, arc_filtration, arc_shift, vertex_filtration=)` (returns a list-like
+`MergeTree` object), `grid_merge_tree(d, U, shape, f, directions)` (grid complexes, no arc list;
+what `Periodica.merge_tree` uses after `periodic_grid`), `barcode(d, tree, drop_zero_length=False)`,
+`image(barcode, size, min, max)`, `dirichlet_domain`,
 `canonical_points`, `points_in_3x_domain`, `reduced_basis`, `euclidean_mst`.
 The curve descriptor (total bar multiplicity alive at each filtration value, per dimension) is
 pure Python: `curves_from_barcodes` / `curve_value` in `core.py`, `Periodica.curves()`.
@@ -161,10 +165,11 @@ values:
 
 - Points matrices are `d × n` (points as columns), lattice basis `U` is `d × d`.
 - Only d = 2 and 3 are supported.
-- This is research code: no CI, no linter config. `tests/test_hidden_points.py` is a plain-assert
-  script (`.venv/bin/python tests/test_hidden_points.py`) covering hidden-point handling in the
-  weighted pipeline plus basic regressions; otherwise verify changes by running `main.py` examples
-  and comparing merge trees / barcodes.
+- This is research code: no CI, no linter config. `tests/*.py` are plain-assert scripts
+  (`.venv/bin/python tests/<name>.py`). `tests/test_grid_barcode.py` holds golden barcodes of grid
+  inputs (matched within 1e-8 in canonical form) plus a gudhi cross-check: any change to
+  `merge_tree.cpp` must keep it passing (`--regenerate` rewrites the goldens on purpose only).
+  `tests/test_hidden_points.py` covers hidden-point handling in the weighted pipeline.
 - Weighted (regular) triangulations can **hide** a point whose power cell is empty
   (`||p−q||² ≤ w_q − w_p`). `periodicDelaunay` drops hidden points, remaps vertex indices, and
   returns the kept original indices as a 4th tuple element; `core.py` warns and exposes

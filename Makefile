@@ -1,5 +1,5 @@
 BAZEL ?= $(shell if command -v bazel >/dev/null 2>&1; then echo bazel; elif command -v bazelisk >/dev/null 2>&1; then echo bazelisk; else echo bazelisk; fi)
-BAZEL_FLAGS ?= --enable_bzlmod
+BAZEL_FLAGS ?= --enable_bzlmod -c opt
 TARGET ?= //:periodica_so
 SO_SRC ?= bazel-bin/_periodica.so
 SO_DST ?= periodica/_periodica.so
@@ -48,7 +48,7 @@ define fetch
 	else echo "Error: curl or wget is required to download $(1)"; exit 1; fi
 endef
 
-.PHONY: all setup check-toolchain uv bazelisk node install-uv venv requirements build clean rebuild web web-deps web-build
+.PHONY: all setup check-toolchain uv bazelisk node install-uv venv requirements build build-debug clean rebuild web web-deps web-build
 
 all: setup build
 
@@ -128,6 +128,11 @@ requirements: venv
 build:
 	if [ -x "$(VENV_PY)" ]; then PATH="$(VENV_BIN):$$PATH" $(BAZEL) build $(BAZEL_FLAGS) $(TARGET); else $(BAZEL) build $(BAZEL_FLAGS) $(TARGET); fi
 	cp -f $(SO_SRC) $(SO_DST)
+
+# unoptimized build with debug info (the default build is -c opt; the merge
+# tree is >10x slower without optimization)
+build-debug: BAZEL_FLAGS := --enable_bzlmod -c dbg
+build-debug: build
 
 web-deps:
 	@if ! command -v npm >/dev/null 2>&1; then \

@@ -247,6 +247,11 @@ g.merge_tree()                      # one beam per grid point: do not print_merg
 g.plot_all_descriptors(show=True, same_range=False)
 ```
 
+For large grids `periodic_grid(U, values, sublevel, build_arcs=False)` skips the explicit arc
+arrays (three arcs per grid point, needed only by the plots and the web UI; the merge tree
+generates them on the fly) and `barcodes(drop_zero_length=True)` leaves out the one
+zero-length bar per non-critical grid point. An 80³ grid then takes well under a second.
+
 ### Quotient complex
 
 #### `quotient_complex(complex_type='delaunay')`
@@ -284,8 +289,11 @@ values of the dual simplices.
 #### `merge_tree()` → `tree`
 
 Calls the native `merge_tree` on the quotient complex (building the Delaunay complex first
-if none exists). `tree` is a list with one entry per **beam** (one beam per quotient vertex,
-in vertex order). Each beam is a time-ordered list of events
+if none exists); for a grid complex it calls `grid_merge_tree`, which generates the arcs on
+the fly from the field and the grid directions. `tree` is a native `MergeTree` object that
+behaves like a list with one entry per **beam** (one beam per quotient vertex, in vertex
+order): `len(tree)`, `tree[i]`, iteration, and `tree.to_list()` for a plain list. Each beam
+is a time-ordered list of events
 
 ```
 (time, coefficient, exponent, child)
@@ -489,9 +497,11 @@ indices and shifts. Invalid shapes raise `ValueError`.
 | `periodic_voronoi(U, points, weights, useCircumCenter=False)` | `(voronoi_points, arcs, point_filtration, arc_filtration, shift)`: Voronoi vertices of one cell `(d, l)`, arcs `(m, 2)`, negated alpha values of vertices and arcs, shifts `(d, m)`. |
 | `full_delaunay(U, points, weights)` | `(P, edges)`: points of the 3× domain (same order as `points_in_3x_domain`) and the edges `(m, 2)` of their weighted Delaunay triangulation. |
 | `full_voronoi(U, points, weights, useCircumCenter=False)` | `(voronoi_points, edges)`: the dual Voronoi skeleton of that triangulation. |
-| `merge_tree(n, d, V, arcs, arc_filtration, arc_shift, vertex_filtration=empty)` | The periodic merge tree (list of beams, see [Merge tree](#merge-tree)). `V` is `(d, ≥d)`; its first `d` columns define the lattice (shift `s` ↦ `V[:, :d] @ s`) and `1/|det|` scales the `R^d` multiplicities. An empty `vertex_filtration` means all zeros. |
-| `print_merge_tree(tree)` | Prints a tree. |
-| `barcode(d, tree)` | `d + 1` lists of `(birth, death, multiplicity)`. |
+| `merge_tree(n, d, V, arcs, arc_filtration, arc_shift, vertex_filtration=empty)` | The periodic merge tree (a `MergeTree`, list-like over beams, see [Merge tree](#merge-tree)). `V` is `(d, ≥d)`; its first `d` columns define the lattice (shift `s` ↦ `V[:, :d] @ s`) and `1/|det|` scales the `R^d` multiplicities. An empty `vertex_filtration` means all zeros. |
+| `grid_merge_tree(d, U, shape, f, directions)` | The merge tree of the lower-star filtration of a periodic grid without an arc list: `f` is the field flattened in C order over `shape` (negated for superlevel sets), `directions` `(d, d)` the integer grid steps (columns) joining neighbors, as `Periodica.grid_directions`. |
+| `MergeTree` | The tree object: `d`, `n`, `len`, indexing, iteration, `to_list()`, `MergeTree.from_list(list)`. |
+| `print_merge_tree(tree)` | Prints a tree (`MergeTree` or list form). |
+| `barcode(d, tree, drop_zero_length=False)` | `d + 1` lists of `(birth, death, multiplicity)`; `drop_zero_length` leaves out bars with `death == birth`. |
 | `image(barcode, size, min, max)` | `(size, size)` persistence image of one barcode over `[min, max]²`. |
 | `delaunay_skeleton(points)` / `weighted_delaunay_skeleton(points, weights)` | Edges `(m, 2)` of the (weighted) Delaunay triangulation of a finite point set (not periodic). |
 | `euclidean_mst(points)` | Edges `(n−1, 2)` of the Euclidean minimum spanning tree of a finite point set. |
